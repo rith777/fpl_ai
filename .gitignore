@@ -1,0 +1,36 @@
+# Conda
+env/
+fpl-ai/
+*.conda/
+
+# Data
+data/raw/
+data/processed/
+data/models/
+data/outputs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
