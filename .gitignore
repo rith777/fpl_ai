@@ -34,3 +34,8 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Web app
+web/node_modules/
+# your saved moves for the coming deadline (written by the app)
+web/public/pending_transfers.json

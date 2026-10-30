@@ -1,192 +1,157 @@
-import pandas as pd
-import numpy as np
+"""Turn raw per-season gameweek CSVs into one clean, standardized dataset."""
+from difflib import SequenceMatcher
 from pathlib import Path
-import logging
 
-logger = logging.getLogger(__name__)
+import numpy as np
+import pandas as pd
+
+# Columns we keep from the raw merged_gw files, mapped to standard names.
+# Source name -> standard name.
+COLUMN_MAP = {
+    "element": "player_id",
+    "name": "player_name",
+    "team": "team",
+    "position": "position",
+    "GW": "gameweek",
+    "fixture": "fixture",
+    "starts": "starts",
+    "opponent_team": "opponent_team",
+    "was_home": "was_home",
+    "kickoff_time": "kickoff_time",
+    "total_points": "total_points",
+    "minutes": "minutes",
+    "goals_scored": "goals_scored",
+    "assists": "assists",
+    "clean_sheets": "clean_sheets",
+    "goals_conceded": "goals_conceded",
+    "bonus": "bonus",
+    "bps": "bps",
+    "influence": "influence",
+    "creativity": "creativity",
+    "threat": "threat",
+    "ict_index": "ict_index",
+    "expected_goals": "expected_goals",
+    "expected_assists": "expected_assists",
+    "expected_goal_involvements": "expected_goal_involvements",
+    "expected_goals_conceded": "expected_goals_conceded",
+    "value": "value",
+    "selected": "selected",
+    "transfers_in": "transfers_in",
+    "transfers_out": "transfers_out",
+    "saves": "saves",
+    "yellow_cards": "yellow_cards",
+    "red_cards": "red_cards",
+    # Defensive contributions (DefCon) — only present from 2025-26 onward.
+    "tackles": "tackles",
+    "clearances_blocks_interceptions": "cbi",
+    "recoveries": "recoveries",
+    "defensive_contribution": "defensive_contribution",
+}
+
+# Defensive columns: FPL only records them from 2025-26. Earlier seasons are
+# left unknown (NaN), so the model doesn't read every player as making none.
+DEFENSIVE_COLS = ["tackles", "cbi", "recoveries", "defensive_contribution"]
+
+POSITION_STD = {"GKP": "GK", "GK": "GK", "DEF": "DEF", "MID": "MID", "FWD": "FWD"}
+
+# Each match's odds as probabilities from one club's side: it wins, the match
+# is drawn, the match has 3+ goals (bookmakers' margin removed).
+ODDS = ["win_prob", "draw_prob", "over_prob"]
+
+
+def load_odds(path: Path) -> pd.DataFrame | None:
+    """``odds.csv`` as one row per club per match: date, club (the odds
+    file's name), home or away, and ODDS."""
+    if not path.exists():
+        return None
+    o = pd.read_csv(path).dropna(subset=["AvgH", "AvgD", "AvgA"])
+    o["date"] = pd.to_datetime(o["Date"], dayfirst=True).dt.date
+    implied = 1 / o[["AvgH", "AvgD", "AvgA"]]
+    p = implied.div(implied.sum(axis=1), axis=0)
+    over = (1 / o["Avg>2.5"]) / (1 / o["Avg>2.5"] + 1 / o["Avg<2.5"])
+    sides = [pd.DataFrame({"date": o["date"], "club": o[club], "home": home, "win_prob": p[win],
+                           "draw_prob": p["AvgD"], "over_prob": over})
+             for club, home, win in (("HomeTeam", True, "AvgH"), ("AwayTeam", False, "AvgA"))]
+    return pd.concat(sides, ignore_index=True)
+
+
+def club_names(odds: pd.DataFrame, rows: pd.DataFrame) -> dict:
+    """The odds file's club names -> FPL's (spelt differently, e.g. "Man
+    United" / "Man Utd"). Clubs are paired one to one by how many of their
+    matches fall on the same dates at the same venue (home or away), best
+    pairs first; spelling only breaks ties."""
+    played = lambda df, club, date, home: set(zip(df[date], df[home].astype(bool)))  # noqa: E731
+    fpl = rows.assign(date=rows["kickoff_time"].dt.date)
+    fpl_sides = {t: played(g, "team", "date", "was_home") for t, g in fpl.groupby("team")}
+    odds_sides = {c: played(g, "club", "date", "home") for c, g in odds.groupby("club")}
+    pairs = sorted(((len(o & f), SequenceMatcher(None, c, t).ratio(), c, t)
+                    for c, o in odds_sides.items() for t, f in fpl_sides.items()), reverse=True)
+    names, used = {}, set()
+    for overlap, _, club, team in pairs:
+        if overlap and club not in names and team not in used:
+            names[club] = team
+            used.add(team)
+    return names
+
+
+def match_odds(rows: pd.DataFrame, odds: pd.DataFrame | None, names: dict) -> pd.DataFrame:
+    """ODDS for each row's match, from its club's side (``team``, ``home``,
+    ``date``); missing where the match had no odds."""
+    if odds is None:
+        return pd.DataFrame(np.nan, index=rows.index, columns=ODDS)
+    o = odds.assign(team=odds["club"].map(names)).dropna(subset=["team"])
+    key = rows[["team", "home", "date"]].astype({"home": bool})
+    return key.merge(o.drop(columns="club"), on=["team", "home", "date"], how="left").set_index(rows.index)[ODDS]
 
 
 class FPLDataProcessor:
-    def __init__(self):
-        # Map string positions to standardized names
-        self.position_map = {
-            'GK': 'GK', 'GKP': 'GK',
-            'DEF': 'DEF',
-            'MID': 'MID',
-            'FWD': 'FWD'
-        }
-
-    def process_season(self, season, data_path):
-        """Process a single season of FPL data"""
-        try:
-            season_path = data_path / season / "merged_gw.csv"
-
-            if not season_path.exists():
-                print(f"File not found: {season_path}")
-                return None
-
-            print(f"   📖 Reading {season} data...")
-            df = pd.read_csv(season_path)
-            print(f"   📊 Original shape: {df.shape}")
-
-            # Add season identifier
-            df['season'] = season
-
-            # Convert date columns
-            if 'kickoff_time' in df.columns:
-                df['kickoff_time'] = pd.to_datetime(df['kickoff_time'])
-                df['year'] = df['kickoff_time'].dt.year
-                df['month'] = df['kickoff_time'].dt.month
-
-            # Standardize position names
-            if 'position' in df.columns:
-                df['position_std'] = df['position'].map(self.position_map)
-                # Fill any missing mappings with original values
-                df['position_std'] = df['position_std'].fillna(df['position'])
-                pos_counts = df['position_std'].value_counts()
-                print(f"   🎯 Positions: {pos_counts.to_dict()}")
-            else:
-                print(f"   ⚠️ No position column found")
-                df['position_std'] = 'Unknown'
-
-            # Calculate additional metrics
-            df = self.calculate_derived_metrics(df)
-
-            # Select and rename key columns
-            df = self.select_features(df)
-
-            print(f"   ✅ Processed {len(df)} records")
-            return df
-
-        except Exception as e:
-            print(f"   ❌ Error processing {season}: {e}")
-            import traceback
-            traceback.print_exc()
+    def process_season(self, season: str, raw_path: Path) -> pd.DataFrame | None:
+        path = Path(raw_path) / season / "merged_gw.csv"
+        if not path.exists():
+            print(f"   {season}: file not found ({path})")
             return None
 
-    def calculate_derived_metrics(self, df):
-        """Calculate derived metrics like points per minute"""
-        df = df.copy()
+        df = pd.read_csv(path)
+        keep = {src: std for src, std in COLUMN_MAP.items() if src in df.columns}
+        out = df[list(keep)].rename(columns=keep).copy()
+        out["season"] = season
 
-        # Points per minute (avoid division by zero)
-        if 'minutes' in df.columns and 'total_points' in df.columns:
-            df['points_per_minute'] = np.where(
-                df['minutes'] > 0,
-                df['total_points'] / df['minutes'],
-                0
-            )
+        out["position"] = out["position"].map(POSITION_STD)
+        # Only players: 2024-25's Assistant Manager chip added managers ('AM') to
+        # the data, whose points follow different rules.
+        out = out[out["position"].notna()]
+        if "kickoff_time" in out.columns:
+            out["kickoff_time"] = pd.to_datetime(out["kickoff_time"], errors="coerce")
 
-        # Goals per minute
-        if 'minutes' in df.columns and 'goals_scored' in df.columns:
-            df['goals_per_minute'] = np.where(
-                df['minutes'] > 0,
-                df['goals_scored'] / df['minutes'],
-                0
-            )
+        out = self._derived_metrics(out)
+        odds = load_odds(Path(raw_path) / season / "odds.csv")
+        if odds is not None and "kickoff_time" in out.columns:
+            key = pd.DataFrame({"team": out["team"], "home": out["was_home"], "date": out["kickoff_time"].dt.date})
+            out[ODDS] = match_odds(key, odds, club_names(odds, out))
+        else:
+            out[ODDS] = np.nan
+        print(f"   {season}: {len(out):,} rows")
+        return out
 
-        # Assists per minute
-        if 'minutes' in df.columns and 'assists' in df.columns:
-            df['assists_per_minute'] = np.where(
-                df['minutes'] > 0,
-                df['assists'] / df['minutes'],
-                0
-            )
-
-        # Value for money (points per million)
-        if 'value' in df.columns and 'total_points' in df.columns:
-            df['value_ppm'] = np.where(
-                df['value'] > 0,
-                df['total_points'] / (df['value'] / 10),
-                0
-            )
-
-        # Add a played indicator (played if minutes > 0)
-        if 'minutes' in df.columns:
-            df['played'] = (df['minutes'] > 0).astype(int)
-
-        # Calculate expected points contribution
-        if all(col in df.columns for col in ['expected_goals', 'expected_assists']):
-            df['expected_goal_involvements'] = df['expected_goals'] + df['expected_assists']
-
+    @staticmethod
+    def _derived_metrics(df: pd.DataFrame) -> pd.DataFrame:
+        minutes = df["minutes"].replace(0, np.nan)
+        df["points_per_90"] = (df["total_points"] / minutes * 90).fillna(0)
+        # value is price in tenths of a million; points per million spent.
+        if "value" in df.columns:
+            df["value_efficiency"] = (df["total_points"] / (df["value"] / 10)).replace([np.inf, -np.inf], 0).fillna(0)
+        df["played"] = (df["minutes"] > 0).astype(int)
         return df
 
-    def select_features(self, df):
-        """Select and rename key features for modeling"""
-        # Map of expected columns to actual columns based on debug output
-        column_mapping = {
-            # Player identification
-            'player_id': 'element',
-            'player_name': 'name',
-            'team': 'team',
-            'position': 'position_std',
-            'season': 'season',
-
-            # Game context
-            'gameweek': 'GW',
-            'opponent_team': 'opponent_team',
-            'was_home': 'was_home',
-            'kickoff_time': 'kickoff_time',
-
-            # Actual performance
-            'total_points': 'total_points',
-            'minutes': 'minutes',
-            'goals_scored': 'goals_scored',
-            'assists': 'assists',
-            'clean_sheets': 'clean_sheets',
-            'goals_conceded': 'goals_conceded',
-            'bonus': 'bonus',
-
-            # Advanced metrics
-            'influence': 'influence',
-            'creativity': 'creativity',
-            'threat': 'threat',
-            'ict_index': 'ict_index',
-
-            # Expected stats (if available)
-            'expected_goals': 'expected_goals',
-            'expected_assists': 'expected_assists',
-            'expected_goal_involvements': 'expected_goal_involvements',
-            'expected_goals_conceded': 'expected_goals_conceded',
-
-            # Derived metrics
-            'points_per_minute': 'points_per_minute',
-            'goals_per_minute': 'goals_per_minute',
-            'assists_per_minute': 'assists_per_minute',
-            'value_ppm': 'value_ppm',
-            'played': 'played',
-
-            # Player value and selection
-            'value': 'value',
-            'selected': 'selected',
-            'transfers_in': 'transfers_in',
-            'transfers_out': 'transfers_out',
-
-            # Other useful stats
-            'bps': 'bps',
-            'penalties_missed': 'penalties_missed',
-            'penalties_saved': 'penalties_saved',
-            'own_goals': 'own_goals',
-            'red_cards': 'red_cards',
-            'yellow_cards': 'yellow_cards',
-            'saves': 'saves'
-        }
-
-        # Only keep columns that exist in the dataframe
-        available_cols = {}
-        missing_cols = []
-
-        for new_name, old_name in column_mapping.items():
-            if old_name in df.columns:
-                available_cols[new_name] = old_name
-            else:
-                missing_cols.append(old_name)
-
-        print(f"   📋 Using {len(available_cols)} available columns")
-        if missing_cols:
-            print(f"   ⚠️ Missing {len(missing_cols)} columns: {missing_cols[:5]}...")
-
-        # Create new dataframe with standardized column names
-        processed_df = df[list(available_cols.values())].copy()
-        processed_df.columns = list(available_cols.keys())
-
-        return processed_df
+    def build_master(self, seasons, raw_path: Path) -> pd.DataFrame:
+        frames = [f for s in seasons if (f := self.process_season(s, raw_path)) is not None]
+        if not frames:
+            raise RuntimeError("No seasons processed; run download first.")
+        master = pd.concat(frames, ignore_index=True)
+        for col in DEFENSIVE_COLS:
+            master[col] = master.get(col, np.nan)
+        # A season FPL didn't record defensive actions for reads all zeros: unknown, not "none made".
+        recorded = master.groupby("season")["defensive_contribution"].transform(lambda s: s.fillna(0).abs().sum() > 0)
+        master.loc[~recorded, DEFENSIVE_COLS] = np.nan
+        master = master.sort_values(["player_id", "season", "gameweek"]).reset_index(drop=True)
+        return master
