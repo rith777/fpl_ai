@@ -779,6 +779,36 @@ dl.kv dd { margin: 0; font-weight: 700; text-align: right; }
 .st-tag { margin-left: 6px; font-size: 10px; font-weight: 800; text-transform: uppercase; padding: 1px 6px; border-radius: 999px; background: var(--lilac); color: var(--ink); }
 .strategy .hx-summary { margin-bottom: 12px; }
 
+/* ---------- beta badge, folded explainers, footer ---------- */
+.beta {
+  display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; vertical-align: middle;
+  font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.5;
+  color: var(--amber); border: 1px solid rgba(255, 176, 32, 0.45); background: rgba(255, 176, 32, 0.1);
+}
+h1 .beta { font-size: 11px; margin-left: 10px; }
+.explainer { margin-top: 10px; }
+.explainer summary { cursor: pointer; color: var(--muted); font-size: 12.5px; font-weight: 700; width: fit-content; }
+.explainer summary:hover { color: var(--text); }
+.explainer .hint { margin-top: 6px; max-width: 900px; }
+.site-footer {
+  max-width: 1440px; margin: 0 auto; padding: 18px 20px 32px; display: flex; flex-wrap: wrap; gap: 8px 24px;
+  justify-content: space-between; color: var(--faint); font-size: 12px; border-top: 1px solid var(--line);
+}
+.site-footer a { color: var(--muted); }
+
+/* ---------- How it works ---------- */
+.about { display: flex; flex-direction: column; gap: 14px; max-width: 1100px; }
+.about h2 { font-size: 24px; margin: 0 0 8px; }
+.about h3 { margin: 0 0 8px; font-size: 16px; }
+.about p, .about li { color: var(--muted); line-height: 1.55; font-size: 14.5px; margin: 0; }
+.about p + p { margin-top: 10px; }
+.about b { color: var(--text); }
+.about a:not(.btn) { color: var(--green); }
+.about-lead { background: linear-gradient(135deg, #3d0045 0%, #61106d 55%, #2c0a40 100%); border-color: rgba(0, 255, 135, 0.28); }
+.about-lead p { max-width: 720px; margin-bottom: 14px; }
+.about-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.about-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 10px; }
+
 /* ---------- This week (home) ---------- */
 .tw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; align-items: start; }
 .tw-grid > .loading { grid-column: 1 / -1; }
@@ -841,7 +871,13 @@ dl.kv dd { margin: 0; font-weight: 700; text-align: right; }
   .pitch { min-height: 480px; padding: 18px 4px 30px; }
   .bench { padding: 10px 6px 14px; }
   .bench-slots { gap: 4px; }
-  .topbar-right { width: 100%; justify-content: space-between; margin-left: 0; }
+  /* Phones: brand and team on one row, tabs scrolling below (faded at the edge
+     so it's clear there are more); the projection blend stays a desktop control. */
+  .topbar-inner { padding: 8px 14px 0; }
+  .topbar-right { margin-left: auto; }
+  .projection { display: none; }
+  .brand { font-size: 18px; }
+  .nav { -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); padding-right: 24px; }
   .nav { scrollbar-width: none; }
   .nav::-webkit-scrollbar { display: none; }
   .nav a { padding: 9px 10px; font-size: 14px; }

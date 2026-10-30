@@ -1,6 +1,49 @@
 # FPL AI
 
-Predicts Fantasy Premier League points and picks an optimal squad.
+A Fantasy Premier League assistant that shows its working. Load your FPL team
+and get this week's captain, lineup, transfer and chip calls, each with the
+reasons behind it and an honest margin of error.
+
+Under the hood: XGBoost models trained on four seasons of match data, a
+decision engine that plays by FPL's own rules, and backtests that replay past
+seasons deadline by deadline **without hindsight**.
+
+## Highlights
+
+- **Point-in-time everything.** Past seasons are replayed with models trained
+  only on earlier seasons, seeing only matches played before each deadline,
+  and scored on what players really scored.
+- **Changes have to earn their place.** A feature or decision rule is kept only
+  if it wins on held-out seasons, by more than its standard error, in every
+  season tested. Most ideas didn't (last-season stats, per-90 rates, set-piece
+  order, a multi-week optimiser, a keeper-only model, blending in a rules-based
+  estimate).
+- **Train on expected points, not points.** Match points are mostly luck.
+  Training on each match's points with goals, assists and clean sheets replaced
+  by their xG-based expectations ranked players better in every held-out season
+  and lifted the backtest from ~2,040 to ~2,140 points a season.
+- **Forecasting is the bottleneck.** The same engine given each player's true
+  scoring rate scores ~2,780 a season, so better projections matter far more
+  than a cleverer optimiser.
+- **Decisions under uncertainty.** What a banked free transfer is worth
+  (~4 pts for the first, ~2 for the second, ~0 after) and when to play chips
+  are measured by replaying deadlines, not assumed.
+- **Error bars in the product.** Projections carry a measured margin of error
+  (±1.1 pts), and moves inside it are shown as too close to call.
+
+## Run it
+
+```
+conda env create -f environment.yml && conda activate fpl-ai   # Python 3.11
+python main.py all              # download, features, train, export, history, backtest
+cd web && npm install && npm run dev
+```
+
+The app opens on **This week**; enter your FPL team ID (the number after
+`/entry/` in your FPL URL). Pages marked **Beta** (History, Strategy, chip
+calls, value curves) are still being worked on.
+
+Independent project, not affiliated with the Premier League or Fantasy Premier League.
 
 ## Data sources
 

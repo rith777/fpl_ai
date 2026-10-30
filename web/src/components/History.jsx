@@ -5,7 +5,7 @@ import {
   HIT_COST, horizon, lineupCheck, model, moveVerdict, planGain, positionStats, rollCheck, sigmaGain, squadGain,
   transferPlan, transferReason,
 } from "../transfers.js";
-import { Shirt } from "./ui.jsx";
+import { Explainer, Shirt } from "./ui.jsx";
 
 const CHIP_NAMES = { bboost: "Bench Boost", "3xc": "Triple Captain", wildcard: "Wildcard", freehit: "Free Hit" };
 const shown = (x) => Math.round(x * 10);
@@ -282,7 +282,7 @@ export default function History({ team, players }) {
           <div><small>Lineups</small><b className="hx-tally">{tally(count(graded.filter((w) => w.lineup).map((w) => lossVerdict(w.lineup.gain, band))))}</b>
             <small>{signed(-sum((w) => w.lineup?.gain))} expected pts vs the best XI</small></div>
         </div>
-        <p className="hint">
+        <Explainer summary="How weeks are graded">
           Each week is graded on what the model projected before its deadline: a model fitted on past seasons, fed only
           this season's matches played by then. No hindsight: real points and rank are shown for context but never used
           to grade. Transfer gains are per gameweek over the next {H}; captain and XI calls are for that week.
@@ -292,7 +292,7 @@ export default function History({ team, players }) {
           injury news, so a move made because of a flag may grade lower than it deserves. Open <b>Why</b> on any week for
           the numbers, and the model's case for its own plan. How the model's strategy would actually have scored from
           your squad is on the Strategy page.
-        </p>
+        </Explainer>
       </section>
       {status && <div className="loading"><span className="spinner" aria-hidden />{status}</div>}
       {[...weeks].reverse().map((w, i) => <Week key={w.gw} w={w} i={i} band={band} />)}

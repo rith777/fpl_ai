@@ -1,15 +1,17 @@
 import React, { useRef, useState } from "react";
 import { CHIP_NAMES } from "../rules.js";
-import { useOutside } from "./ui.jsx";
+import { Beta, useOutside } from "./ui.jsx";
 
-// Nav tabs; `also` lists the routes a tab covers (My Team's Pick / Transfers modes).
+// Nav tabs; `also` lists the routes a tab covers (My Team's Pick / Transfers
+// modes); `beta` marks pages still in development.
 export const PAGES = [
   { id: "home", label: "This week" },
   { id: "team", label: "My Team", also: ["transfers"] },
   { id: "stats", label: "Statistics" },
   { id: "fixtures", label: "Fixtures" },
-  { id: "history", label: "History" },
-  { id: "strategy", label: "Strategy" },
+  { id: "history", label: "History", beta: true },
+  { id: "strategy", label: "Strategy", beta: true },
+  { id: "about", label: "How it works" },
 ];
 
 export const recencyLabel = (r) => (r === 0 ? "Season" : r === 1 ? "Form" : `${Math.round(r * 100)}% form`);
@@ -72,7 +74,7 @@ export default function Header({ page, recency, setRecency, team, teamLoading, s
         <nav className="nav" aria-label="Pages">
           {PAGES.map((p) => {
             const on = page === p.id || p.also?.includes(page);
-            return <a key={p.id} href={`#/${p.id}`} className={on ? "active" : ""} aria-current={on ? "page" : undefined}>{p.label}</a>;
+            return <a key={p.id} href={`#/${p.id}`} className={on ? "active" : ""} aria-current={on ? "page" : undefined}>{p.label}{p.beta && <Beta />}</a>;
           })}
         </nav>
 

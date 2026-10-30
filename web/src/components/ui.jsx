@@ -2,6 +2,14 @@ import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, u
 import { createPortal } from "react-dom";
 import { fdrBand } from "../lib.js";
 
+// Marks a feature still in development: its numbers and wording may change.
+export const Beta = () => <span className="beta" title="Still in development: numbers and wording may change">Beta</span>;
+
+// A long explanation folded away behind one line.
+export const Explainer = ({ summary = "How this works", children }) => (
+  <details className="explainer"><summary>{summary}</summary><p className="hint">{children}</p></details>
+);
+
 // Club data keyed by team id ({name, short_name, code, fixtures}) from teams.json.
 export const TeamsContext = createContext({});
 export const useTeam = (teamId) => useContext(TeamsContext)[teamId];

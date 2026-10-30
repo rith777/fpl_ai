@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { METRICS, AXIS_KEYS, POSITIONS, POS_COLOR, POS_NAME, fairShareOwnership, isNailed, NAILED_MINUTES } from "../lib.js";
 import { model } from "../transfers.js";
-import { Badge, Dropdown, NextFixtures, Segmented, Shirt, TeamsContext } from "./ui.jsx";
+import { Badge, Beta, Dropdown, NextFixtures, Segmented, Shirt, TeamsContext } from "./ui.jsx";
 import Insights from "./Insights.jsx";
 
 const W = 760, H = 420, M = { top: 18, right: 18, bottom: 46, left: 56 };
@@ -411,7 +411,7 @@ export default function Stats({ players, recency, placedIds, onPick }) {
           </div>
         </div>
         <div className="value-toggle">
-          <span className="w-label">Value curve</span>
+          <span className="w-label">Value curve</span> <Beta />
           <div className="chips">
             {POSITIONS.map((p) => {
               const on = curvesOn && curvePos.has(p);

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { fetchSeason } from "../fpl.js";
 import { identity, playSeason } from "../strategy.js";
 import { horizon } from "../transfers.js";
-import { Segmented, Shirt } from "./ui.jsx";
+import { Explainer, Segmented, Shirt } from "./ui.jsx";
 
 const CHIP_NAMES = { bboost: "Bench Boost", "3xc": "Triple Captain", wildcard: "Wildcard", freehit: "Free Hit" };
 const signed = (x, d = 0) => `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(d)}`;
@@ -69,8 +69,8 @@ function Backtest({ bt }) {
           </tbody>
         </table>
       </div>
-      <p className="hint">
-        How it's tested: each past season ({bt.seasons.join(", ")}) is replayed with a model trained only on the seasons
+      <Explainer summary="How it's tested">
+        Each past season ({bt.seasons.join(", ")}) is replayed with a model trained only on the seasons
         before it, projecting every gameweek from the matches played before its deadline. Each strategy is the app's own
         transfer engine with two settings: how many gameweeks ahead a move is valued over, and the least a transfer must
         add (smaller gains are rolled, since FPL banks the free transfer). Every strategy plays each season from the same
@@ -81,7 +81,7 @@ function Backtest({ bt }) {
         {" "}strategies on the same seasons flatters the winner, so the pick is tested on a season it wasn't picked on,
         and replaces the app's rule only if it wins there by more than its standard error, and wins on every season it was
         tested on (runs within one season share its results, so one lucky season can't carry it).
-      </p>
+      </Explainer>
     </section>
   );
 }
@@ -221,7 +221,7 @@ function YourSeason({ team, players, rule }) {
           </table>
         </div>
       )}
-      <p className="hint">
+      <Explainer summary="How this comparison works">
         The strategy starts from your squad, bank and free transfers at the point chosen above (after your Wildcard
         by default, so both sides start from the same rebuilt squad), decides each week only from the projections at
         that deadline (the same ones the History page grades on), and plays your later chips in the same weeks: its own
@@ -231,7 +231,7 @@ function YourSeason({ team, players, rule }) {
         how the two approaches have gone, not which is better; past seasons below are the better test. Your points are
         FPL's own,
         net of hits; the strategy's use FPL's autosub and vice-captain rules.
-      </p>
+      </Explainer>
     </section>
   );
 }

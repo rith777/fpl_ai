@@ -13,7 +13,8 @@ import History from "./components/History.jsx";
 import Strategy from "./components/Strategy.jsx";
 import TransfersPanel from "./components/TransfersPanel.jsx";
 import ThisWeek from "./components/ThisWeek.jsx";
-import { Segmented, TeamsContext } from "./components/ui.jsx";
+import About from "./components/About.jsx";
+import { Beta, Segmented, TeamsContext } from "./components/ui.jsx";
 import { fetchTeam, fetchPending, savePending, withPending, loadRecentTeams, saveRecentTeams } from "./fpl.js";
 import { configureModel, lineupCheck } from "./transfers.js";
 
@@ -420,13 +421,18 @@ export default function App() {
     fixtures: ["Fixtures", `Gameweeks ${nextGw}+ · ${clubs.teams.length} clubs`],
     history: ["History", team ? `${team.name} · each move graded on what was known at the time` : "Your season, week by week"],
     strategy: ["Strategy", team ? `${team.name} vs the model's strategy, and what past seasons say works` : "What past seasons say works"],
+    about: ["How it works", "What the app does, and how it's built and tested"],
   };
+  const pageInfo = PAGES.find((p) => p.id === route || p.also?.includes(route));
+  useEffect(() => { document.title = `${heads[route][0]} · FPL AI`; }, [route]);
 
   let page;
   if (loadError) {
     page = <section className="card empty-card"><p>{loadError}</p></section>;
   } else if (!players.length) {
     page = <div className="loading"><span className="spinner" aria-hidden />Loading players…</div>;
+  } else if (route === "about") {
+    page = <About />;
   } else if (route === "home") {
     page = <ThisWeek clubs={clubs} team={team} loading={teamLoading} onLoad={loadTeam} savedTeamId={savedTeamId}
       recent={recent} players={players} squad={squad} nextGw={nextGw} total={total} captain={captain} vice={vice}
@@ -482,7 +488,7 @@ export default function App() {
       <main className="page" key={route}>
         <div className="page-head">
           <div>
-            <h1>{heads[route][0]}</h1>
+            <h1>{heads[route][0]}{pageInfo?.beta && <Beta />}</h1>
             <p>{heads[route][1]}</p>
           </div>
           {(route === "team" || route === "transfers") && (
@@ -492,6 +498,11 @@ export default function App() {
         </div>
         {page}
       </main>
+      <footer className="site-footer">
+        <span>FPL AI is an independent project, not affiliated with the Premier League or Fantasy Premier League.
+          Projections are estimates with a margin of error.</span>
+        <span><a href="#/about">How it works</a> · <a href="https://github.com/rith777/fpl_ai">GitHub</a></span>
+      </footer>
       {toast && <div className="toast" key={toast.id} role="status">{toast.msg}</div>}
     </TeamsContext.Provider>
   );

@@ -6,7 +6,7 @@ import {
 } from "../transfers.js";
 import { CHIP_NAMES, chipsLeft, rulesReason } from "../rules.js";
 import { TIMED_CHIPS, chooseChip } from "../strategy.js";
-import { NextFixtures, Segmented, Shirt, TeamsContext } from "./ui.jsx";
+import { Beta, NextFixtures, Segmented, Shirt, TeamsContext } from "./ui.jsx";
 import PlayerList from "./PlayerList.jsx";
 import { TeamLoader } from "./Header.jsx";
 
@@ -202,7 +202,7 @@ function Chips({ squad, used, nextGw, players, bank, priceOf, recency, freeTrans
   const bt = model().chipBacktest;
   return (
     <section className="card chips-card">
-      <h2>Chips</h2>
+      <h2>Chips <Beta /></h2>
       <ul className="chip-list">
         {left.map((c) => {
           const open = nextGw >= c.start;

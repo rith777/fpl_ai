@@ -4,7 +4,7 @@ import { CHIP_NAMES, chipsLeft } from "../rules.js";
 import { HIT_COST, horizon, model, rollCheck, transferPlan } from "../transfers.js";
 import { chipCall, tagFor } from "./TransfersPanel.jsx";
 import { TeamLoader } from "./Header.jsx";
-import { NextFixtures, Shirt } from "./ui.jsx";
+import { Beta, NextFixtures, Shirt } from "./ui.jsx";
 
 // "2d 4h", "3h 12m", "8m": time to or since a moment.
 function span(ms) {
@@ -124,7 +124,7 @@ function Chips({ squad, used, nextGw }) {
   if (!open.length && !later.length) return null;
   return (
     <section className="card tw-card">
-      <div className="card-head"><h2>Chips</h2></div>
+      <div className="card-head"><h2>Chips <Beta /></h2></div>
       <ul className="tw-chips">
         {open.map((c) => {
           const call = chipCall(c.name, squad, used, nextGw);
