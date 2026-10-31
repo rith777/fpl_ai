@@ -87,7 +87,7 @@ export default function App() {
           ...model, strategy: strategy && {
             ...strategy, minGain: strategy.app.minGain,
             // The planner charges for banked transfers only if that rule won on held-out seasons.
-            bankValue: strategy.bank?.adopted ? strategy.bank.value : null,
+            keep: strategy.bank?.adopted ? strategy.bank : null,
           },
           chipBacktest: chips, chipPolicy: chips?.chosen,
         });

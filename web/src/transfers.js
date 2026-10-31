@@ -279,19 +279,37 @@ const applyMoves = (squad, moves) =>
   squad.map((p) => moves.find((m) => m.out === p)?.in ?? p);
 const spend = (moves) => moves.reduce((t, m) => t + m.cost, 0);
 
+// Starters a squad can expect to be without per gameweek over the horizon
+// (each player's chance of not playing, summed): its exposure to injuries and
+// rotation, which is when a banked transfer earns its keep.
+export const absences = (squad) => squad.reduce((t, p) => t + 1 - (p.play_h ?? 0), 0);
+
+// What keeping the k-th free transfer is worth (pts) for this squad, measured
+// on past seasons by scripts/bank.mjs (`keep`: strategy.json's bank): a value
+// per k, plus a slope per expected absence when the backtest found the squad's
+// exposure predicts it. Nothing past FPL's cap, where a rolled transfer is lost.
+export function keepValue(keep, squad, k) {
+  if (!keep || k < 1 || k > (MODEL.max_free_transfers ?? Infinity)) return 0;
+  return Math.max(0, (keep.value[k] ?? 0) + (keep.slope?.[k] ?? 0) * absences(squad));
+}
+
+// Projected gains of the moves the planner picks have come in short of
+// projection (the best-looking move is often the most over-projected); the
+// share that has held up, measured by scripts/bank.mjs. 1 until measured.
+export const heldUp = (keep) => keep?.shrink ?? 1;
+
 // Single moves one at a time while they add points: a free transfer when its
 // gain clears `minGain` per gameweek (by default: shows on screen, at least
 // 0.1), a hit when its gain over the horizon beats the points the hit costs by
 // as much. `used` = transfers already planned.
 // What using the j-th free transfer this week (0 = the first) costs in pts/GW
 // over the horizon: the worth of the transfer it takes out of next week's bank
-// (`bankValue[k]`: the k-th banked free transfer, measured on past seasons by
-// scripts/bank.mjs). With j used, next week has ft - j; unused, ft - j + 1
-// (nothing past FPL's cap, where a rolled transfer is lost).
+// (keepValue; `ctx.keep`, an adopted strategy.json bank). With j used, next
+// week has ft - j; unused, ft - j + 1. In projected points, so scaled up by
+// how much of a projected gain has held up.
 export function bankCost(ctx, j) {
-  const k = ctx.freeTransfers - j + 1;
-  if (!ctx.bankValue || k > (MODEL.max_free_transfers ?? Infinity)) return 0;
-  return (ctx.bankValue[k] ?? 0) / horizon();
+  if (!ctx.keep) return 0;
+  return keepValue(ctx.keep, ctx.squad, ctx.freeTransfers - j + 1) / heldUp(ctx.keep) / horizon();
 }
 const planBankCost = (ctx, items) => {
   const free = Math.min(ctx.freeTransfers, items.reduce((t, it) => t + it.moves.length, 0));
@@ -332,13 +350,13 @@ const planCost = (items) => items.reduce((t, it) => t + spend(it.moves), 0);
 // can fund a better buy elsewhere), each extended while moves still pay.
 // `minGain` is what each transfer must add per gameweek to be made (a
 // strategy setting, see strategy.js); 0 = any gain that shows. `noHits`:
-// free transfers only. `bankValue`: what a banked free transfer is worth
+// free transfers only. `keep`: what a banked free transfer is worth
 // (bankCost); by default the backtest's, if it was adopted (strategy.json);
 // null values every transfer at nothing kept.
 export function transferPlan({
-  squad, players, bank, priceOf, recency, freeTransfers, minGain = 0, noHits = false, bankValue = MODEL.strategy?.bankValue,
+  squad, players, bank, priceOf, recency, freeTransfers, minGain = 0, noHits = false, keep = MODEL.strategy?.keep,
 }) {
-  const ctx = { players, priceOf, recency, freeTransfers, minGain, noHits, bankValue };
+  const ctx = { squad, players, priceOf, recency, freeTransfers, minGain, noHits, keep };
   const plain = greedy(ctx, squad, bank, 0);
   const hits = Math.max(0, 2 - freeTransfers);
   const pair = !(hits && noHits) && bestPair({ squad, players, bank, priceOf, recency });
@@ -376,7 +394,7 @@ function* benches(squad) {
 // strategy backtest on past seasons (strategy.json); without one, any gain
 // that shows. At the cap a rolled transfer is lost, so any gain is worth it.
 // Returns how many of the plan's free moves clear the bar.
-export function rollCheck({ plan, freeTransfers }) {
+export function rollCheck({ plan, freeTransfers, squad }) {
   if (!plan.length || plan.some((it) => it.hits)) return null;
   const minGain = MODEL.strategy?.minGain ?? 0;
   const atCap = freeTransfers >= (MODEL.max_free_transfers ?? Infinity);
@@ -387,14 +405,16 @@ export function rollCheck({ plan, freeTransfers }) {
   }
   const best = plan[0];
   const gain = best.gain / best.moves.length;
-  // What keeping the transfer is worth, as measured on past seasons (bank.mjs):
-  // rolling makes it next week's (freeTransfers + 1)-th. A move adding less
-  // over the horizon is a toss-up: rolling (for next week's double move, or
-  // injury cover) did as well.
+  // What keeping the transfer is worth for this squad, as measured on past
+  // seasons (bank.mjs): rolling makes it next week's (freeTransfers + 1)-th.
+  // A move expected to add less over the horizon (its projected gain, at the
+  // share such gains have held up) is a toss-up: rolling (for next week's
+  // double move, or injury cover) did as well.
   const bank = MODEL.strategy?.bank;
   const k = freeTransfers + 1;
-  const keep = bank && k <= (MODEL.max_free_transfers ?? Infinity) ? bank.value[k] ?? 0 : 0;
-  return { minGain, atCap, worth, gain, use: worth > 0, keep, k, close: worth > 0 && gain * horizon() <= keep };
+  const keep = keepValue(bank, squad ?? [], k);
+  const expected = gain * horizon() * heldUp(bank);
+  return { minGain, atCap, worth, gain, use: worth > 0, keep, k, expected, close: worth > 0 && expected <= keep };
 }
 
 // Chip values from FPL's rules for each of the next gameweeks (`gws`, one per

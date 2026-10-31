@@ -51,7 +51,7 @@ function gradeWeek(gw, hist, season, meta) {
     const freeTransfers = season.freeTransfersAt(gw);
     const plan = transferPlan({ squad: before, players: pool, bank: prev.bank / 10, priceOf, recency: 0, freeTransfers });
     result.best = { plan, gain: planGain(plan), freeTransfers };
-    result.roll = rollCheck({ plan, freeTransfers });
+    result.roll = rollCheck({ plan, freeTransfers, squad: before });
   }
   result.moves = moves;
 

@@ -16,10 +16,30 @@ const get = (path) => fetch(`/fpl/${path}`)
     return r.json();
   });
 
-// FPL refuses squad picks to cloud servers (the hosted site's relay), though
-// it serves a team's history and transfers. A refused request reads as null.
+// FPL refuses some requests from cloud servers (the hosted site's relay):
+// squad picks most of the time, and at busy times (around deadlines) a team's
+// details, history and transfers too. A refused request reads as null.
 export const BLOCKED = 403;
 const getOrBlocked = (path) => get(path).catch((e) => { if (e.status === BLOCKED) return null; throw e; });
+
+// A team's details, history and transfers, kept in this browser each time FPL
+// serves them, for when it refuses: until the next deadline passes they don't
+// change (`stale` says the copy was used).
+const CACHE_KEY = "fplCache";
+const REFUSED = "FPL is turning away requests from this site right now (it does that to cloud servers, most often "
+  + "near a deadline). Try again in a minute";
+const kept = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || "{}"); } catch { return {}; } };
+async function getKept(path, stale) {
+  const data = await getOrBlocked(path);
+  if (data) {
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ...kept(), [path]: data })); } catch { /* storage blocked or full */ }
+    return data;
+  }
+  const copy = kept()[path];
+  if (!copy) throw new Error(REFUSED);
+  stale.add(path);
+  return copy;
+}
 
 // The squad, saved in this browser by team ID ({gw, picks: [{id, starter}]}),
 // for when FPL won't serve it: entered once, then kept current from the
@@ -147,13 +167,14 @@ export function withPending(team, entry, byId) {
 // browser, brought up to date with the public transfer list. With neither,
 // `needsSquad` asks the manager to enter it once.
 export async function fetchTeam(id, byId) {
-  const entry = await get(`entry/${id}/`);
+  const stale = new Set();
+  const entry = await getKept(`entry/${id}/`, stale);
   const gw = entry.current_event;
   if (!gw) throw new Error("This team hasn't played a gameweek yet");
   const [served, history, transfers] = await Promise.all([
     getOrBlocked(`entry/${id}/event/${gw}/picks/`),
-    get(`entry/${id}/history/`),
-    get(`entry/${id}/transfers/`),
+    getKept(`entry/${id}/history/`, stale),
+    getKept(`entry/${id}/transfers/`, stale),
   ]);
   const week = history.current.find((w) => w.event === gw) ?? history.current.at(-1);
   const squad = served
@@ -178,6 +199,7 @@ export async function fetchTeam(id, byId) {
     ft: estimateFreeTransfers(history),
     chipsUsed: (history.chips || []).map((c) => ({ name: c.name, event: c.event })),
     needsSquad: !squad,
+    stale: stale.size > 0,
     picks: (squad ?? []).map((pk) => {
       const p = byId[pk.id];
       const now = p?.price ?? 0;

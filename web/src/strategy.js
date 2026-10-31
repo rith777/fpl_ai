@@ -10,7 +10,7 @@
 // policy (chooseChip), and so is when to play the Free Hit.
 import { sellingPrice } from "./fpl.js";
 import { xiFits } from "./lib.js";
-import { HIT_COST, benchInOrder, bestXI, chipValues, configureModel, horizon, model, transferPlan } from "./transfers.js";
+import { HIT_COST, benchInOrder, bestXI, chipValues, configureModel, horizon, model, planGain, transferPlan } from "./transfers.js";
 
 // Who each player is, and nothing about how he's done since: pages that
 // replay past deadlines see only what the projections then knew.
@@ -125,10 +125,12 @@ export function chooseChip({ squad, gw, used, policy, chips = Object.keys(TIMED_
 
 // Play `strategy` ({horizon, minGain}; `chipPolicy` decides when to play
 // Triple Captain and Bench Boost (chooseChip); `hits: false` for free transfers
-// only, `hold: true` to make no transfers at all) through `weeks` ([{gw, rows, actual:
+// only, `hold: true` to make no transfers at all; `keep`: the banked-transfer
+// values the planner weighs, see transferPlan) through `weeks` ([{gw, rows, actual:
 // Map}]) from `start` ({ids, bank, bought: id -> price paid, ft}). `chips`
 // ({gw: name}) are played on those weeks: a wildcard or free hit rebuilds the
-// squad with free moves (a free hit for its one week only). Yields each week.
+// squad with free moves (a free hit for its one week only). Yields each week,
+// with the squad as it stood and the projected gain (pts/GW) of the moves made.
 export function* playSeason({ weeks, fields, meta, start, strategy, chips = {} }) {
   const cap = model().max_free_transfers ?? Infinity;
   let state = { ...start, bought: { ...start.bought }, last: {} };
@@ -150,15 +152,16 @@ export function* playSeason({ weeks, fields, meta, start, strategy, chips = {} }
     // Selling price: half of any rise since he was bought (a player the plan
     // only just bought sells for what he cost).
     const priceOf = (p) => (state.bought[p.player_id] == null ? p.price : sellingPrice(state.bought[p.player_id], p.price));
-    let moves = [], hits = 0;
+    let moves = [], hits = 0, gain = 0;
     if (!(strategy.hold && !rebuild)) {
       const plan = withHorizon(H, () => transferPlan({
         squad, players: [...pool.values()], bank: state.bank, priceOf, recency: 0,
-        ...(rebuild ? { freeTransfers: squad.length }
-          : { freeTransfers: state.ft, minGain: strategy.minGain, noHits: strategy.hits === false, bankValue: strategy.bankValue }),
+        ...(rebuild ? { freeTransfers: squad.length, keep: null }
+          : { freeTransfers: state.ft, minGain: strategy.minGain, noHits: strategy.hits === false, keep: strategy.keep }),
       }));
       moves = plan.flatMap((it) => it.moves);
       hits = rebuild ? 0 : plan.reduce((t, it) => t + it.hits, 0);
+      gain = planGain(plan);
     }
     const saved = state;
     state = { ...state, bought: { ...state.bought } };
@@ -177,7 +180,7 @@ export function* playSeason({ weeks, fields, meta, start, strategy, chips = {} }
     const points = scored.total - hits * HIT_COST;
     const ftBefore = state.ft;
     if (!rebuild) state.ft = Math.min(cap, Math.max(0, state.ft - moves.length) + 1);
-    yield { gw, chip, moves, hits, ft: ftBefore, bank: state.bank, ...team, ...scored, points, chipValues: timed.outlook[0], before: saved };
+    yield { gw, chip, moves, hits, gain, squad, ft: ftBefore, bank: state.bank, ...team, ...scored, points, chipValues: timed.outlook[0], before: saved };
     if (chip === "freehit") state = { ...saved, ft: saved.ft, last: state.last };
   }
 }
@@ -205,9 +208,19 @@ export function seasonSetup(input, season, startIndex, gws = input.seasons[seaso
 // That season played by `strategy`. `gws` replaces the season's projections
 // (diagnostics feed it other projections). Per gameweek: points and where they came from.
 export function backtestRun(input, season, startIndex, strategy, gws = input.seasons[season].gws) {
-  return [...playSeason({ ...seasonSetup(input, season, startIndex, gws), strategy })].map((w) => ({
-    gw: w.gw, chip: w.chip ?? null, tc: w.chipValues?.tc, bb: w.chipValues?.bb, xi: w.chipValues?.xi,
-    points: w.points, transfers: w.moves.length, hits: w.hits,
-    armband: w.armband, bestArmband: w.bestArmband, autosubs: w.autosubs,
-  }));
+  return [...playSeason({ ...seasonSetup(input, season, startIndex, gws), strategy })].map(weekSummary);
+}
+
+export const weekSummary = (w) => ({
+  gw: w.gw, chip: w.chip ?? null, tc: w.chipValues?.tc, bb: w.chipValues?.bb, xi: w.chipValues?.xi,
+  points: w.points, transfers: w.moves.length, hits: w.hits,
+  armband: w.armband, bestArmband: w.bestArmband, autosubs: w.autosubs,
+});
+
+// Points scored over the weeks from index `i` (at most `ahead` of them), had
+// the season been played from `start` there: a fork off a played path, to
+// set one decision against another from the same position (bank.mjs, chips.mjs).
+export function forkPoints(setup, i, ahead, start, strategy, chips = {}) {
+  const weeks = [...playSeason({ ...setup, weeks: setup.weeks.slice(i, i + ahead), start, strategy, chips })];
+  return { weeks, total: weeks.reduce((t, w) => t + w.points, 0) };
 }

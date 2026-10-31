@@ -9,6 +9,7 @@ export default function About() {
   const m = model(), s = m.strategy;
   const app = s?.strategies?.find((r) => r.horizon === s.app.horizon && r.minGain === s.app.minGain);
   const bank = s?.bank?.value;
+  const wc = m.chipBacktest?.wildcard;
   return (
     <div className="about">
       <section className="card about-lead">
@@ -56,7 +57,20 @@ export default function About() {
             optimiser added nothing.</li>}
           {bank && <li><b>A banked transfer has a price.</b> Replaying deadlines with one more free transfer: the first
             is worth about {bank[1].toFixed(0)} points over the following weeks, the second about {bank[2].toFixed(0)},
-            later ones close to nothing. Small moves are shown as a toss-up rather than pushed.</li>}
+            later ones close to nothing{s.bank.conditional?.adopted ? ", and more for a squad carrying doubts" : ""}.
+            Small moves are shown as a toss-up rather than pushed.</li>}
+          {s?.bank?.heldUp && <li><b>Planned moves deliver {Math.round(s.bank.heldUp.share * 100)}% of their projection.</b> Over
+            {" "}{s.bank.heldUp.moves.toLocaleString()} moves the engine made in past seasons, the players bought outscored the
+            players sold by that share of the projected gap{s.bank.heldUp.adopted
+              ? ", consistently enough that the roll-or-move call now uses it"
+              : ": correcting for it didn't predict better in every season, so the calls take projections at face value"}.</li>}
+          {wc && <li><b>Wildcard timing.</b> Played at every deadline of three past seasons and scored over the next {wc.ahead} weeks,
+            {" "}{wc.chosen ? <>waiting until the rebuild's projected gain clears a bar ({wc.chosen.name} of weeks) beat playing it at
+              the first chance by {Math.round(wc.validation.gain)} ± {Math.round(wc.validation.se)} pts on seasons it wasn't picked on.
+              Most of that is not playing it early: the projected gain itself barely predicts what a Wildcard adds
+              (correlation {wc.corr.toFixed(2)}).</>
+              : <>no timing rule beat playing it at the first chance in every held-out season, so the app shows the rebuild's
+              gain and leaves the call to you.</>}</li>}
           <li><b>Most ideas didn't survive.</b> Last season's stats, per-90 rates, set-piece order, a keeper-only model
             and blending in a rules-based estimate were all tried and dropped after failing on held-out seasons.</li>
           {m.sigma_mean && <li><b>Every number has an error bar.</b> A projection is typically

@@ -141,6 +141,12 @@ python main.py all         # download, features, train, export, history, backtes
   Hit (`web/scripts/chips.mjs` -> `web/public/chips.json`): at the first
   chance, or when the week beats every later week in view and clears a bar set
   by the other seasons. The Transfers page's Chips card follows the winner.
+  The Wildcard is tested separately: played at every deadline off the no-chip
+  path and scored over the next 8 weeks. Waiting until the rebuild's projected
+  gain is in the top quarter of past weeks beat playing it at the first chance
+  by +31 ± 11 pts a season on held-out seasons (every season positive), mostly
+  by not playing it early: the projected gain barely predicts what a Wildcard
+  really adds (correlation 0.07).
 - `node web/scripts/diagnose.mjs data/outputs/backtest_input.json` (after a
   backtest) shows where the strategy's points go: the same planner on naive,
   model, "true level" oracle and full-foresight projections, with and without
@@ -170,7 +176,11 @@ python main.py all         # download, features, train, export, history, backtes
   4 pts for the first, 2 for the second, ~0 beyond. Charging moves for it
   didn't change season totals (+1 ± 10), so the planner doesn't; the app calls
   a move worth less than the transfer it uses a toss-up instead of telling you
-  to make it.
+  to make it. Also tested there and not kept: making that value depend on how
+  many absences the squad expects (no better held out in one of three
+  seasons), and scaling planned gains by how much of them came in (the 1,228
+  moves made delivered 107% of their projected gain, so there's nothing to
+  correct).
 - Tried and not kept: blending the model with the per-rule estimate (the best
   weight drifted from season to season and the picked one lost out of sample),
   a keeper-only model (worse every season) and last-season features for the

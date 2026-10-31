@@ -173,22 +173,40 @@ function useBlanksAndDoubles(squad) {
 }
 
 // What a Wildcard would add now: the best rebuild (every transfer free) over
-// the horizon, against the best plan with the free transfers you have.
-function WildcardCheck({ squad, players, bank, priceOf, recency, freeTransfers }) {
+// the horizon, against the best plan with the free transfers you have. When
+// the chip backtest found a timing rule that held up (chips.json wildcard),
+// the call is that rule's: play once the gap clears its bar.
+function WildcardCheck({ squad, players, bank, priceOf, recency, freeTransfers, stop, nextGw }) {
   const [result, setResult] = useState(null);
   const check = () => {
     const ctx = { squad, players, bank, priceOf, recency };
-    const rebuild = transferPlan({ ...ctx, freeTransfers: squad.length });
+    const rebuild = transferPlan({ ...ctx, freeTransfers: squad.length, keep: null });
     const normal = transferPlan({ ...ctx, freeTransfers });
     setResult({ rebuild: gainOf(rebuild), changes: rebuild.flatMap((it) => it.moves).length, normal: gainOf(normal) });
   };
   if (!result) return <button className="btn sm" onClick={check}>What would a Wildcard add now?</button>;
+  const gap = result.rebuild - result.normal;
+  const rule = model().chipBacktest?.wildcard;
+  const last = nextGw >= stop;
+  let call;
+  if (rule?.chosen) {
+    const bar = rule.chosen.bar;
+    const play = last || (bar != null && gap >= bar);
+    call = <><b>{play ? "Play it this week" : "Hold"}:</b> {last ? "this is the last week to use it." : bar == null
+      ? "the backtest's rule plays it at the end of its window."
+      : `the rule plays it once the gap reaches +${bar.toFixed(1)} pts/GW (the bar from past seasons, `
+        + `${signed(rule.validation.gain)} ± ${rule.validation.se.toFixed(0)} pts on seasons it wasn't picked on, mostly from `
+        + "not playing it early: the projected gap is only a weak guide to what a Wildcard really adds)."}</>;
+  } else {
+    call = <>{gap > sigmaGain() ? "That's a real gap: worth considering." : "Inside the model's margin of error: keep it for later."}
+      {rule && <> No timing rule held up when Wildcards were played through {model().chipBacktest.seasons.length} past seasons,
+        so this is a judgement call.</>}</>;
+  }
   return (
     <p className="chip-call">
       A Wildcard now: <b>{signed(result.rebuild)} pts/GW</b> over the next {horizon()} GWs ({result.changes} changes),
       against {signed(result.normal)} from your best plan with {freeTransfers} free transfer{freeTransfers === 1 ? "" : "s"}.
-      {" "}{result.rebuild - result.normal > sigmaGain() ? "That's a real gap: worth considering."
-        : "Inside the model's margin of error: keep it for later."}
+      {" "}{call}
     </p>
   );
 }
@@ -225,7 +243,8 @@ function Chips({ squad, used, nextGw, players, bank, priceOf, recency, freeTrans
               {open && c.name === "freehit" && <small className="chip-note">A one-week squad that reverts after: worth most in a blank or double gameweek.</small>}
               {open && c.name === "wildcard" && <small className="chip-note">Unlimited free transfers for a week, kept afterwards: best just before a run of blanks or doubles, or when your squad needs many changes.</small>}
               {open && c.name === "wildcard" && squad.length === 15 && (
-                <WildcardCheck squad={squad} players={players} bank={bank} priceOf={priceOf} recency={recency} freeTransfers={freeTransfers} />
+                <WildcardCheck squad={squad} players={players} bank={bank} priceOf={priceOf} recency={recency}
+                  freeTransfers={freeTransfers} stop={c.stop} nextGw={nextGw} />
               )}
             </li>
           );
@@ -326,11 +345,15 @@ function RollCheck({ roll, moves }) {
   const bar = model().strategy;
   const g = `+${roll.gain.toFixed(1)} pts/GW`;
   const ord = (k) => `${k}${["th", "st", "nd", "rd"][k] ?? "th"}`;
+  const held = bar?.bank?.shrink;
   if (roll.close) return (
     <p className="roll-check roll">
-      <b>Toss-up, rolling is fine:</b> the move adds about +{(roll.gain * horizon()).toFixed(1)} pts over the next {horizon()} GWs.
+      <b>Toss-up, rolling is fine:</b> the move projects +{(roll.gain * horizon()).toFixed(1)} pts over the next {horizon()} GWs
+      {held ? <>, and moves like it have delivered about {Math.round(held * 100)}% of their projection in past seasons
+        (+{roll.expected.toFixed(1)})</> : null}.
       Rolling makes this next week's {ord(roll.k)} free transfer, and in past seasons that has been worth about
-      +{roll.keep.toFixed(1)} pts over the weeks that follow (a two-move week, cover for an injury). Played through
+      +{roll.keep.toFixed(1)} pts over the weeks that follow (a two-move week, cover for an injury){bar.bank.slope
+        ? ", more for a squad with more doubts in it, like this one has" : ""}. Played through
       {" "}{bar.seasons.length} past seasons, holding transfers back like this neither gained nor lost
       ({bar.bank.gain >= 0 ? "+" : "−"}{Math.abs(bar.bank.gain).toFixed(0)} ± {bar.bank.se.toFixed(0)} pts a season), so either is a sound choice.
     </p>
@@ -381,7 +404,7 @@ export default function TransfersPanel({
     () => (ready && tab === "upgrades" ? upgradeTargets({ squad, players, bank, priceOf, recency: r }) : null),
     [ready, tab, squad, players, bank, priceOf, r]);
   const roll = useMemo(
-    () => rollCheck({ plan, freeTransfers: ftLeft }), [plan, ftLeft]);
+    () => rollCheck({ plan, freeTransfers: ftLeft, squad }), [plan, ftLeft, squad]);
   const planGain = plan.reduce((t, it) => t + it.gain - (it.hits * HIT_COST) / horizon(), 0);
   const stats = useMemo(() => positionStats(players), [players]);
   const fairShare = fairShareOwnership(players);

@@ -1,5 +1,5 @@
 // Chip timing backtest: when to play Triple Captain, Bench Boost and the
-// Free Hit (the Wildcard isn't played). The
+// Free Hit, and separately the Wildcard (below). The
 // app's transfer strategy is played through past seasons (as in
 // strategy.mjs) with FPL's chip windows (model.json), under each policy:
 //   none             no chips (the transfer backtest);
@@ -14,22 +14,48 @@
 // A chip about to be lost is always played. The policy is picked on two
 // seasons and tested on the third, as strategy.mjs does, against "first".
 //
+// Wildcard: at every deadline of its windows, off the no-chip path, the
+// squad is rebuilt (every transfer free) and played on for 8 weeks against
+// the path itself: what a Wildcard played then really added. Its projected
+// worth that week is the rebuild's gain over the plan made without it
+// (pts/GW). Rules: play at the first chance; at the last; or at the first
+// week the projected worth clears a bar (the best half, quarter or tenth of
+// those weeks in the other seasons), else at the last. Validated as above.
+//
 // Usage: node scripts/chips.mjs <backtest_input.json>   (run by `python main.py backtest`)
 import fs from "node:fs";
 import { isMainThread, parentPort, workerData } from "node:worker_threads";
 import { configureModel } from "../src/transfers.js";
-import { TIMED_CHIPS, backtestRun } from "../src/strategy.js";
+import { TIMED_CHIPS, backtestRun, forkPoints, playSeason, seasonSetup, weekSummary } from "../src/strategy.js";
 import { inParallel } from "./workers.mjs";
 
 const PUBLIC = new URL("../public/", import.meta.url);
 const QUANTILES = [0.5, 0.75, 0.9];
+const WILDCARD_AHEAD = 8; // weeks a Wildcard is scored over, as bank.mjs scores a banked transfer
 
 if (!isMainThread) {
   const { input, model, jobs } = workerData;
   configureModel(model);
+  const short = (w) => ({ points: w.points, chip: w.chip, tc: w.tc, bb: w.bb, xi: w.xi });
   for (const job of jobs) {
-    const weeks = backtestRun(input, job.season, job.start, { horizon: input.horizon, minGain: 0, chipPolicy: job.policy });
-    parentPort.postMessage({ ...job, weeks: weeks.map((w) => ({ points: w.points, chip: w.chip, tc: w.tc, bb: w.bb, xi: w.xi })) });
+    const strategy = { horizon: input.horizon, minGain: 0, chipPolicy: job.policy };
+    if (job.policy) {
+      parentPort.postMessage({ ...job, weeks: backtestRun(input, job.season, job.start, strategy).map(short) });
+      continue;
+    }
+    // No chips: also a Wildcard played at each deadline of its windows, off
+    // this path, against the path itself over the weeks that follow.
+    const setup = seasonSetup(input, job.season, job.start);
+    const path = [...playSeason({ ...setup, strategy })];
+    const windows = (model.chips ?? []).filter((c) => c.name === "wildcard");
+    const wildcard = path.flatMap((w, i) => {
+      if (!windows.some((c) => c.start <= w.gw && w.gw <= c.stop)) return [];
+      const ahead = Math.min(WILDCARD_AHEAD, path.length - i);
+      const fork = forkPoints(setup, i, ahead, w.before, strategy, { [w.gw]: "wildcard" });
+      const kept = path.slice(i, i + ahead).reduce((t, x) => t + x.points, 0);
+      return [{ gw: w.gw, proj: fork.weeks[0].gain - w.gain, value: fork.total - kept }];
+    });
+    parentPort.postMessage({ ...job, weeks: path.map(weekSummary).map(short), wildcard });
   }
 } else {
   const input = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
@@ -92,13 +118,53 @@ if (!isMainThread) {
   // announces later, which these projections can't see. A chip about to
   // expire is still played.
   const chosen = adopted ? best : rows.find((r) => r.name === "lookahead");
+
+  // Wildcard: each rule's pick in each window, scored by what that week's fork added.
+  const windows = (model.chips ?? []).filter((c) => c.name === "wildcard");
+  const wcOf = (u) => none.find((r) => r.season === u.season && r.start === u.start).wildcard;
+  const wcBar = (from, q) => quantile(none.filter((r) => from.includes(r.season)).flatMap((r) => r.wildcard.map((d) => d.proj)), q);
+  const wcRules = [{ name: "first" }, { name: "last" }, ...QUANTILES.map((q) => ({ name: `top ${Math.round((1 - q) * 100)}%`, q }))];
+  const wcValue = (rule, u) => sum(windows.map((c) => {
+    const ds = wcOf(u).filter((d) => c.start <= d.gw && d.gw <= c.stop);
+    if (!ds.length) return 0;
+    if (rule.name === "first") return ds[0].value;
+    const bar = rule.q == null ? Infinity : wcBar(seasons.filter((s) => s !== u.season), rule.q);
+    return (ds.find((d) => d.proj >= bar) ?? ds.at(-1)).value;
+  }));
+  const wcGains = (rule, us = units) => us.map((u) => wcValue(rule, u) - wcValue(wcRules[0], u));
+  const wcRows = wcRules.map((r) => ({ name: r.name, q: r.q ?? null, value: mean(units.map((u) => wcValue(r, u))), vsFirst: mean(wcGains(r)), se: seOf(wcGains(r)) }));
+  const wcFolds = seasons.map((season) => {
+    const train = units.filter((u) => u.season !== season), test = units.filter((u) => u.season === season);
+    const picked = wcRules.slice(1).reduce((a, b) => (mean(wcGains(b, train)) > mean(wcGains(a, train)) ? b : a));
+    return { season, picked: picked.name, gains: wcGains(picked, test) };
+  });
+  const wcAll = wcFolds.flatMap((f) => f.gains);
+  const wcAdopted = mean(wcAll) > seOf(wcAll) && wcFolds.every((f) => mean(f.gains) > 0);
+  const wcBest = wcRules.slice(1).reduce((a, b) => (mean(wcGains(b)) > mean(wcGains(a)) ? b : a));
+  // Does the projected worth say anything about what a Wildcard then added?
+  const ds = none.flatMap((r) => r.wildcard);
+  const corr = (() => {
+    const [mx, my] = [mean(ds.map((d) => d.proj)), mean(ds.map((d) => d.value))];
+    const cov = sum(ds.map((d) => (d.proj - mx) * (d.value - my)));
+    return cov / Math.sqrt(sum(ds.map((d) => (d.proj - mx) ** 2)) * sum(ds.map((d) => (d.value - my) ** 2)));
+  })();
+
   const out = {
     seasons, starts: units.length / seasons.length, policies: rows,
     validation: { folds: folds.map((f) => ({ season: f.season, picked: f.picked, gain: mean(f.gains) })), gain: mean(all), se: seOf(all), adopted },
     chosen: { name: chosen.name, kind: chosen.name === "first" ? "first" : "lookahead", bar: chosen.q == null ? {} : bars(seasons, chosen.q) },
+    wildcard: {
+      ahead: WILDCARD_AHEAD, weeks: ds.length, corr, rules: wcRows,
+      validation: { folds: wcFolds.map((f) => ({ season: f.season, picked: f.picked, gain: mean(f.gains) })), gain: mean(wcAll), se: seOf(wcAll), adopted: wcAdopted },
+      chosen: wcAdopted ? { name: wcBest.name, bar: wcBest.q == null ? null : wcBar(seasons, wcBest.q) } : null,
+    },
   };
   fs.writeFileSync(new URL("chips.json", PUBLIC), JSON.stringify(out));
   console.log("\n   policy                    pts/season  vs first   vs none");
   for (const r of rows) console.log(`   ${r.name.padEnd(24)} ${r.points.toFixed(0).padStart(10)} ${(r.vsFirst >= 0 ? "+" : "") + r.vsFirst.toFixed(1)} ± ${r.se.toFixed(1)}  ${(r.vsNone >= 0 ? "+" : "") + r.vsNone.toFixed(0)}`);
   console.log(`   out of sample vs first: ${out.validation.gain.toFixed(1)} ± ${out.validation.se.toFixed(1)} (${folds.map((f) => `${f.season}: ${f.picked}`).join("; ")}) -> ${chosen.name}`);
+  console.log(`\n   wildcard rule   pts added (${WILDCARD_AHEAD} wks, all windows)  vs first`);
+  for (const r of wcRows) console.log(`   ${r.name.padEnd(15)} ${r.value.toFixed(1).padStart(10)} ${(r.vsFirst >= 0 ? "+" : "") + r.vsFirst.toFixed(1)} ± ${r.se.toFixed(1)}`);
+  console.log(`   projected worth vs what it added: correlation ${corr.toFixed(2)} over ${ds.length} weeks`);
+  console.log(`   out of sample vs first: ${mean(wcAll).toFixed(1)} ± ${seOf(wcAll).toFixed(1)} (${wcFolds.map((f) => `${f.season}: ${f.picked} ${mean(f.gains).toFixed(0)}`).join("; ")}) -> ${wcAdopted ? wcBest.name : "no rule adopted"}`);
 }

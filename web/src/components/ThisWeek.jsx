@@ -58,7 +58,7 @@ function Transfer({ squad, players, bank, priceOf, recency, freeTransfers, made,
   const ftLeft = Math.max(0, freeTransfers - made);
   const plan = useMemo(() => transferPlan({ squad, players, bank, priceOf, recency, freeTransfers: ftLeft }),
     [squad, players, bank, priceOf, recency, ftLeft]);
-  const roll = rollCheck({ plan, freeTransfers: ftLeft });
+  const roll = rollCheck({ plan, freeTransfers: ftLeft, squad });
   const moves = plan.flatMap((it) => it.moves);
   const gain = plan.reduce((t, it) => t + it.gain - (it.hits * HIT_COST) / horizon(), 0);
   const use = plan.length && (roll ? roll.use : true);
