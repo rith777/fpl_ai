@@ -69,8 +69,9 @@ export default function About() {
               the first chance by {Math.round(wc.validation.gain)} ± {Math.round(wc.validation.se)} pts on seasons it wasn't picked on.
               Most of that is not playing it early: the projected gain itself barely predicts what a Wildcard adds
               (correlation {wc.corr.toFixed(2)}).</>
-              : <>no timing rule beat playing it at the first chance in every held-out season, so the app shows the rebuild's
-              gain and leaves the call to you.</>}</li>}
+              : <>no timing rule beat playing it at the first chance in every held-out season (the projected gain barely
+              predicts what a Wildcard adds: correlation {wc.corr.toFixed(2)}), so the app shows the rebuild's gain and
+              leaves the call to you.</>}</li>}
           <li><b>Most ideas didn't survive.</b> Last season's stats, per-90 rates, set-piece order, a keeper-only model
             and blending in a rules-based estimate were all tried and dropped after failing on held-out seasons.</li>
           {m.sigma_mean && <li><b>Every number has an error bar.</b> A projection is typically

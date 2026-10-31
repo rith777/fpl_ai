@@ -365,7 +365,26 @@ export function transferPlan({
   // Plans compared net of the banked transfers they use up.
   const net = (items) => planGain(items) - planBankCost(ctx, items);
   const better = sameGain(net(opened), net(plain)) ? planCost(opened) < planCost(plain) : net(opened) > net(plain);
-  return net(opened.slice(0, 1)) > 2 * minGain && better ? opened : plain;
+  const plan = net(opened.slice(0, 1)) > 2 * minGain && better ? opened : plain;
+  return freeTransfers >= squad.length ? rebuilt(ctx, plan, bank) : plan;
+}
+
+// A rebuild (every transfer free: a Wildcard or Free Hit) goes on where single
+// moves stop: while a pair priced jointly still adds points, make it and
+// carry on with single moves from there.
+function rebuilt(ctx, plan, bank) {
+  let squad = applyMoves(ctx.squad, plan.flatMap((it) => it.moves));
+  bank -= planCost(plan);
+  for (;;) {
+    const pair = bestPair({ ...ctx, squad, bank });
+    if (!pair || shown(pair.gain) <= 0) return plan;
+    squad = applyMoves(squad, pair.moves);
+    bank -= spend(pair.moves);
+    const more = greedy(ctx, squad, bank, 0);
+    plan = [...plan, { ...pair, hits: 0 }, ...more];
+    squad = applyMoves(squad, more.flatMap((it) => it.moves));
+    bank -= planCost(more);
+  }
 }
 
 const permutations = (xs) => (xs.length < 2 ? [xs]

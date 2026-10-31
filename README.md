@@ -142,11 +142,19 @@ python main.py all         # download, features, train, export, history, backtes
   chance, or when the week beats every later week in view and clears a bar set
   by the other seasons. The Transfers page's Chips card follows the winner.
   The Wildcard is tested separately: played at every deadline off the no-chip
-  path and scored over the next 8 weeks. Waiting until the rebuild's projected
-  gain is in the top quarter of past weeks beat playing it at the first chance
-  by +31 ± 11 pts a season on held-out seasons (every season positive), mostly
-  by not playing it early: the projected gain barely predicts what a Wildcard
-  really adds (correlation 0.07).
+  path and scored over the next 8 weeks. No timing rule (first chance, last
+  week, or once the rebuild's projected gain clears a bar) won every held-out
+  season, and the projected gain barely predicts what a Wildcard really adds
+  (correlation 0.06), so the app shows the rebuild's gain and leaves the call
+  to you.
+- A Wildcard or Free Hit rebuild keeps going after single swaps stop paying:
+  while a pair of moves priced together still adds points, it makes the pair
+  and carries on. On the model's projections that halves the gap to the best
+  possible squad (1.2 -> 0.6 pts/GW); replayed on the same weeks of three past
+  seasons, a Wildcard added +3.9 ± 1.3 pts more over 8 weeks and a Free Hit
+  +0.9 ± 0.25 more in its week, every season positive. Valuing the Wildcard
+  squad over every week in view (5) instead of the usual 3 didn't help
+  (−0.8 ± 1.2).
 - `node web/scripts/diagnose.mjs data/outputs/backtest_input.json` (after a
   backtest) shows where the strategy's points go: the same planner on naive,
   model, "true level" oracle and full-foresight projections, with and without
