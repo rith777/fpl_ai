@@ -104,7 +104,11 @@ class FPLApiClient:
         teams = {t["id"]: t["name"] for t in data["teams"]}
         # The club a row belongs to comes from its fixture (so a player who
         # moved clubs mid-season has each match credited to the right club).
-        sides = {f["id"]: (f["team_h"], f["team_a"]) for f in self._get("fixtures/")}
+        fixtures = self._get("fixtures/")
+        sides = {f["id"]: (f["team_h"], f["team_a"]) for f in fixtures}
+        # FPL lists every fixture of the live gameweek, unplayed ones as 0
+        # minutes; only matches that are over count as history.
+        over = {f["id"] for f in fixtures if f.get("finished_provisional") or f.get("finished")}
 
         def one(el):
             for attempt in range(3):
@@ -118,6 +122,8 @@ class FPLApiClient:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             for el, history in pool.map(one, data["elements"]):
                 for h in history:
+                    if h["fixture"] not in over:
+                        continue
                     home, away = sides.get(h["fixture"], (el["team"], el["team"]))
                     rows.append({
                         **h,
