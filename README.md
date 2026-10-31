@@ -45,6 +45,30 @@ calls, value curves) are still being worked on.
 
 Independent project, not affiliated with the Premier League or Fantasy Premier League.
 
+## Deploy (AWS)
+
+A static site plus one small function, kept fresh by a scheduled job
+(`infra/template.yaml`):
+
+```
+browser -> CloudFront -> S3 (app + data JSON)
+                      -> /fpl/* -> API Gateway -> Lambda -> FPL API   (read-only team endpoints)
+GitHub Actions, every 6h -> export -> checks -> S3 + raw FPL snapshot
+```
+
+```
+infra/deploy.sh stack     # create the AWS resources; prints the site URL and the role ARN
+infra/deploy.sh models    # upload trained models for the scheduled refresh
+infra/deploy.sh site      # build and publish the app
+```
+
+Set the printed role ARN as the GitHub repository variable `AWS_ROLE_ARN`;
+`.github/workflows/refresh.yml` then re-scores players every 6 hours. The export
+refuses to publish if its checks fail (missing projections, unknown clubs, a
+past deadline), and every run keeps the raw FPL API response in S3, since FPL
+doesn't archive injury flags or news. Saved transfers live in each visitor's
+browser, so the site keeps no user data.
+
 ## Data sources
 
 | Source | Used for | Notes |

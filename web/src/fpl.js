@@ -1,12 +1,13 @@
-// Load a manager's real FPL team through the /fpl dev-server proxy. Only public
+// Load a manager's real FPL team through the /fpl proxy (the dev server here,
+// a small function in production: infra/template.yaml). Only public
 // endpoints are used (no login), so the squad is as of the last deadline:
 // transfers already queued for the next gameweek aren't visible yet.
 import { model } from "./transfers.js";
 
 const get = (path) => fetch(`/fpl/${path}`)
   .catch(() => {
-    // The request never got an answer: the app's own dev server (which relays FPL calls) isn't running.
-    throw new Error("can't reach the app's server. Start it with `npm run dev` in the web folder");
+    // The request never got an answer: the app's own server (which relays FPL calls) is down or offline.
+    throw new Error("can't reach the app's server. Check your connection and try again");
   })
   .then((r) => {
     if (r.status === 404) throw new Error("no FPL team with that ID");
@@ -69,15 +70,25 @@ export async function fetchSeason(id) {
   };
 }
 
-// --- transfers already made on the FPL site (public/pending_transfers.json) ---
-export const fetchPending = () =>
-  fetch("pending_transfers.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+// --- transfers already made on the FPL site (FPL keeps them private until the
+// deadline), saved in this browser by team ID. Earlier versions kept them in
+// public/pending_transfers.json; that file is read while this browser has none.
+const PENDING_KEY = "fplPendingTransfers";
 
-export const savePending = (teamId, entry) =>
-  fetch("/api/pending", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ teamId: String(teamId), entry }),
-  }).then((r) => { if (!r.ok) throw new Error("couldn't save transfers"); });
+export async function fetchPending() {
+  try {
+    const saved = localStorage.getItem(PENDING_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch { /* storage blocked */ }
+  return fetch("pending_transfers.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+}
+
+export async function savePending(teamId, entry) {
+  const all = { ...(await fetchPending()) };
+  if (entry) all[teamId] = entry; else delete all[teamId];
+  try { localStorage.setItem(PENDING_KEY, JSON.stringify(all)); }
+  catch { throw new Error("couldn't save transfers: this browser blocks site storage"); }
+}
 
 // Overlay saved moves for the next GW onto the public squad: swap players, move
 // the money through the bank, and use the saved free-transfer count. `price` is

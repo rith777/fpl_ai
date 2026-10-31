@@ -1,0 +1,10 @@
+# Pinned to the versions the saved models were trained with, so the scheduled
+# refresh (.github/workflows/refresh.yml) loads them exactly as trained.
+pandas==2.2.3
+numpy==1.26.4
+scipy==1.13.1
+scikit-learn==1.6.1
+xgboost==3.3.0
+joblib
+requests
+pulp

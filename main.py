@@ -539,18 +539,59 @@ def _teams_payload(api) -> dict:
             "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"), "teams": teams}
 
 
+SNAPSHOTS_PATH = DATA_RAW_PATH / "snapshots"
+
+
+def _snapshot_raw(api):
+    """Keep this run's FPL API response as it came (gzipped, timestamped, never
+    overwritten): FPL doesn't archive injury flags, news or ownership, so these
+    are the only point-in-time record of them for later backtests."""
+    import gzip
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    dest = SNAPSHOTS_PATH / CURRENT_SEASON / f"bootstrap_{stamp}.json.gz"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(gzip.compress(json.dumps(api.bootstrap()).encode()))
+
+
+def _check_export(players, teams):
+    """What the published files must satisfy, like a data test: a broken FPL
+    response or model run stops here instead of reaching the site."""
+    problems = []
+    if players.empty:
+        problems.append("no players")
+    for col in ("xp_next", "xp_h", "start_prob", "price"):
+        values = pd.to_numeric(players[col], errors="coerce")
+        bad = values.isna() | ~np.isfinite(values) | (values < 0)
+        if bad.any():
+            problems.append(f"{int(bad.sum())} players with a missing or negative {col}")
+    if (players["start_prob"] > 1).any():
+        problems.append("a chance of playing above 100%")
+    clubs = {t["id"] for t in teams["teams"]}
+    if not set(players["team_id"]) <= clubs:
+        problems.append("players at clubs missing from teams.json")
+    if teams["deadline"] and datetime.fromisoformat(teams["deadline"].replace("Z", "+00:00")) < datetime.now(timezone.utc):
+        problems.append(f"next deadline {teams['deadline']} is in the past")
+    if problems:
+        raise SystemExit("export stopped, nothing written: " + "; ".join(problems))
+
+
 def cmd_export(_):
     """Score live players and write web/public/players.json, teams.json and
-    model.json (calibration the app's transfer engine runs on)."""
+    model.json (calibration the app's transfer engine runs on), after checking
+    them (_check_export). Also keeps the raw FPL API response (_snapshot_raw)."""
     players, api = _scored()
     if players is None:
-        return
+        raise SystemExit("export stopped: couldn't reach the FPL API")
+    _snapshot_raw(api)
     cols = [c for c in EXPORT_COLUMNS if c in players.columns]
+    teams = _teams_payload(api)
+    _check_export(players[cols], teams)
     out = players[cols].replace({np.nan: None})
     WEB_PUBLIC.mkdir(parents=True, exist_ok=True)
     (WEB_PUBLIC / "players.json").write_text(out.to_json(orient="records"), encoding="utf-8")
     print(f"   wrote {len(out)} players -> {WEB_PUBLIC / 'players.json'}")
-    (WEB_PUBLIC / "teams.json").write_text(json.dumps(_teams_payload(api)), encoding="utf-8")
+    (WEB_PUBLIC / "teams.json").write_text(json.dumps(teams), encoding="utf-8")
     cal = json.loads((MODELS_PATH / "calibration.json").read_text()) if (MODELS_PATH / "calibration.json").exists() else {}
     rules = api.bootstrap()["game_config"]["rules"]
     model = {

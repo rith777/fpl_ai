@@ -1,0 +1,204 @@
+# FPL AI on AWS: the web app as a static site, one small function that relays
+# FPL API calls, a bucket for the pipeline's models and raw snapshots, and a
+# role the scheduled GitHub Actions refresh assumes (no stored AWS keys).
+#
+#   browser -> CloudFront -> S3 (app + data JSON)
+#                         -> /fpl/* -> API Gateway -> Lambda -> FPL API
+#   GitHub Actions (every 6h) -> export + checks -> S3, and invalidate CloudFront
+#
+# Deploy: infra/deploy.sh stack
+AWSTemplateFormatVersion: "2010-09-09"
+Description: FPL AI web app, FPL API relay and refresh pipeline storage
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Default: rith777/fpl_ai
+    Description: owner/name of the repository whose workflows may publish
+
+Resources:
+  # ---------- the site ----------
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  SiteAccess:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${AWS::StackName}-site
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub ${SiteBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}
+
+  # ---------- FPL API relay ----------
+  # The FPL API sends no CORS headers, so the browser can't call it directly.
+  # Only the read-only manager endpoints the app uses are relayed, so this
+  # can't serve as an open proxy.
+  ProxyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ProxyFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt ProxyRole.Arn
+      Timeout: 10
+      MemorySize: 128
+      Code:
+        ZipFile: |
+          const ALLOWED = /^entry\/\d+\/(history\/|transfers\/|event\/\d+\/picks\/)?$/;
+          exports.handler = async (event) => {
+            const path = (event.rawPath || "").replace(/^\/fpl\//, "");
+            if (event.requestContext?.http?.method !== "GET" || !ALLOWED.test(path)) {
+              return { statusCode: 404, body: "not found" };
+            }
+            const r = await fetch(`https://fantasy.premierleague.com/api/${path}`, {
+              headers: { "User-Agent": "fpl-ai (+https://github.com/rith777/fpl_ai)" },
+            });
+            return {
+              statusCode: r.status,
+              headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+              body: await r.text(),
+            };
+          };
+
+  ProxyApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}-fpl
+      ProtocolType: HTTP
+      Target: !GetAtt ProxyFunction.Arn
+
+  ProxyPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ProxyFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ProxyApi}/*
+
+  # ---------- CDN in front of both ----------
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: FPL AI
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: site
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            S3OriginConfig: { OriginAccessIdentity: "" }
+            OriginAccessControlId: !GetAtt SiteAccess.Id
+          - Id: fpl
+            DomainName: !Sub ${ProxyApi}.execute-api.${AWS::Region}.amazonaws.com
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+        DefaultCacheBehavior:
+          TargetOriginId: site
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6          # Managed-CachingOptimized
+        CacheBehaviors:
+          - PathPattern: /fpl/*
+            TargetOriginId: fpl
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad        # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader
+
+  # ---------- pipeline storage ----------
+  # models/: trained models the scheduled export loads; raw/: timestamped FPL
+  # API snapshots, kept as-is (FPL doesn't archive injury flags or news).
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration: { Status: Enabled }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ---------- scheduled refresh (GitHub Actions, OIDC: no stored keys) ----------
+  GitHubOIDC:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  RefreshRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref GitHubOIDC }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:ref:refs/heads/*
+      Policies:
+        - PolicyName: publish
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: [s3:ListBucket]
+                Resource: [!GetAtt SiteBucket.Arn, !GetAtt DataBucket.Arn]
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: [!Sub "${SiteBucket.Arn}/*", !Sub "${DataBucket.Arn}/*"]
+              - Effect: Allow
+                Action: cloudfront:CreateInvalidation
+                Resource: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}
+              - Effect: Allow
+                Action: cloudformation:DescribeStacks
+                Resource: !Ref AWS::StackId
+
+Outputs:
+  SiteUrl:
+    Value: !Sub https://${Distribution.DomainName}
+  SiteBucket:
+    Value: !Ref SiteBucket
+  DataBucket:
+    Value: !Ref DataBucket
+  DistributionId:
+    Value: !Ref Distribution
+  RefreshRoleArn:
+    Description: set as the AWS_ROLE_ARN variable in the GitHub repository
+    Value: !GetAtt RefreshRole.Arn

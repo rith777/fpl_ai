@@ -1,0 +1,49 @@
+# Keeps the live site current: every 6 hours (injuries, prices, team news),
+# re-score players with the trained models, check the output, keep the raw FPL
+# API snapshot, and publish. Retraining stays a local step (`python main.py
+# all`, then `infra/deploy.sh models`). AWS access is through the RefreshRole
+# in infra/template.yaml (OIDC, no stored keys): set its ARN as the repository
+# variable AWS_ROLE_ARN.
+name: Refresh data
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: eu-central-1
+      - run: pip install -r requirements.txt
+      - run: npm ci
+        working-directory: web
+      - run: infra/deploy.sh pull-models
+      # export stops (and so does this job) if its checks fail: the site keeps the last good data.
+      - run: python main.py export
+      - run: python main.py history
+      - run: infra/deploy.sh snapshots
+      - run: infra/deploy.sh site
