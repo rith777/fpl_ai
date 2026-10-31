@@ -192,8 +192,11 @@ python main.py all         # download, features, train, export, history, backtes
   correct).
 - Tried and not kept: blending the model with the per-rule estimate (the best
   weight drifted from season to season and the picked one lost out of sample),
-  a keeper-only model (worse every season) and last-season features for the
-  first fixtures (no gain).
+  a keeper-only model (worse every season), last-season features for the
+  first fixtures (no gain), season-to-date averages per appearance, a
+  player's share of his club's xG times the club's expected goals next match,
+  club Elo ratings built from Premier League results since 2010-11, and
+  shallower or more cautious trees (none better in every held-out season).
 - `train` reports out-of-sample accuracy against a season-average baseline and
   writes `calibration.json`: per-position calibration lines and the model's
   measured error, which the web app uses to say when gains are too close to call.

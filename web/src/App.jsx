@@ -16,7 +16,7 @@ import ThisWeek from "./components/ThisWeek.jsx";
 import About from "./components/About.jsx";
 import { Beta, Segmented, TeamsContext } from "./components/ui.jsx";
 import { fetchTeam, fetchPending, savePending, saveSquad, withPending, loadRecentTeams, saveRecentTeams } from "./fpl.js";
-import { configureModel, lineupCheck } from "./transfers.js";
+import { configureModel, lineupCheck, lineupPoints } from "./transfers.js";
 
 // Would adding `pos` to the current starters keep a legal XI reachable?
 function canStart(starters, pos) {
@@ -371,7 +371,10 @@ export default function App() {
 
   const starterPlayers = resolve(starters);
   const benchPlayers = resolve(bench);
-  const { total, captain, vice } = teamScore(starterPlayers, recency, captainId);
+  const { total: xiTotal, captain, vice } = teamScore(starterPlayers, recency, captainId);
+  // With a full squad picked, autosubs and the vice's armband count too.
+  const total = starterPlayers.length === 11 && benchPlayers.length === 4
+    ? lineupPoints(starterPlayers, benchPlayers, captain, vice, recency) : xiTotal;
   const nextGw = (clubs.current_gw ?? team?.gw ?? 0) + 1;
   const lineup = useMemo(() => lineupCheck(squad, starterPlayers, benchPlayers, recency), [starters, bench, byId, recency]);
 

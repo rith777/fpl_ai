@@ -458,6 +458,15 @@ export function chipValues(squad, gws = MODEL.gws ?? []) {
   });
 }
 
+// What the manager's lineup is expected to score this gameweek: the XI, the
+// captain's double (the vice's if he doesn't play) and the bench in its order
+// through autosubs, so a doubtful starter costs only what his cover doesn't make up.
+export function lineupPoints(starters, bench, captain, vice, recency) {
+  const score = scorer(recency, false);
+  const armband = captain ? score(captain) + (vice ? (1 - score.play(captain)) * score(vice) : 0) : 0;
+  return starters.reduce((t, p) => t + score(p), 0) + armband + benchExpected(starters, bench, score);
+}
+
 // This gameweek's best XI and bench order (searched over every legal choice)
 // against the manager's. `gain` is 0 unless the difference shows at display
 // precision (0.1). `closest` is the tightest start/bench call in the

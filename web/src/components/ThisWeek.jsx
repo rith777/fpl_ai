@@ -45,7 +45,7 @@ function Deadline({ clubs, nextGw, total, now }) {
         <div>
           <span className="w-label">Your XI projects</span>
           <b className="tw-count grad">{total.toFixed(1)}</b>
-          <small>points, captain included</small>
+          <small>points, captain and bench autosubs included</small>
         </div>
       )}
       {clubs.updated && <small className="tw-fresh">Projections updated {span(now - new Date(clubs.updated))} ago</small>}

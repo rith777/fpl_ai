@@ -16,7 +16,8 @@ export default function Summary({ total, captain, spent, budget, starters, bench
       <div className="widget hero">
         <span className="w-label">Predicted points</span>
         <span className="w-big">{shownTotal.toFixed(1)}</span>
-        <span className="w-sub">Starting XI · captain counts double</span>
+        <span className="w-sub">{starters.length === 11 && bench.length === 4
+          ? "Starting XI, captain double, bench autosubs" : "Starting XI · captain counts double"}</span>
       </div>
 
       <div className="widget">
