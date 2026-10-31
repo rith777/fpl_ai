@@ -779,6 +779,14 @@ dl.kv dd { margin: 0; font-weight: 700; text-align: right; }
 .st-tag { margin-left: 6px; font-size: 10px; font-weight: 800; text-transform: uppercase; padding: 1px 6px; border-radius: 999px; background: var(--lilac); color: var(--ink); }
 .strategy .hx-summary { margin-bottom: 12px; }
 
+.squad-needed {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+  padding: 12px 14px; border-radius: 12px; font-size: 13.5px; line-height: 1.45;
+  background: rgba(255, 176, 32, 0.08); border: 1px solid rgba(255, 176, 32, 0.35);
+}
+.squad-needed b { color: var(--amber); }
+.tw-hero .btn { align-self: flex-start; }
+
 /* ---------- beta badge, folded explainers, footer ---------- */
 .beta {
   display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; vertical-align: middle;

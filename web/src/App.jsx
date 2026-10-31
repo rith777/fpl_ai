@@ -15,7 +15,7 @@ import TransfersPanel from "./components/TransfersPanel.jsx";
 import ThisWeek from "./components/ThisWeek.jsx";
 import About from "./components/About.jsx";
 import { Beta, Segmented, TeamsContext } from "./components/ui.jsx";
-import { fetchTeam, fetchPending, savePending, withPending, loadRecentTeams, saveRecentTeams } from "./fpl.js";
+import { fetchTeam, fetchPending, savePending, saveSquad, withPending, loadRecentTeams, saveRecentTeams } from "./fpl.js";
 import { configureModel, lineupCheck } from "./transfers.js";
 
 // Would adding `pos` to the current starters keep a legal XI reachable?
@@ -107,7 +107,8 @@ export default function App() {
   // the budget is selling value + bank (not a flat £100m), as on the FPL site.
   const owned = useMemo(() => new Map((team?.picks ?? []).map((p) => [p.id, p])), [team]); // id -> {bought, selling}
   const priceOf = useCallback((p) => owned.get(p.player_id)?.selling ?? p.price, [owned]);
-  const budget = team ? team.bank + team.picks.reduce((t, p) => t + p.selling, 0) : BUDGET;
+  // Until a squad FPL wouldn't serve is entered, the budget is the team's value (squad + bank).
+  const budget = !team ? BUDGET : team.needsSquad ? team.value : team.bank + team.picks.reduce((t, p) => t + p.selling, 0);
   const spent = squad.reduce((t, p) => t + priceOf(p), 0);
   const transfersMade = team ? team.picks.filter((p) => !placedIds.has(p.id)).length : 0;
 
@@ -194,6 +195,16 @@ export default function App() {
       await savePending(team.id, entry);
       await loadTeam(team.id);
       flash("Saved: these moves now load with your team");
+    } catch (e) { flash(e.message); }
+  }
+
+  // A squad FPL wouldn't serve, entered here: saved in this browser, then kept
+  // current from FPL's public transfer list (fpl.js fetchTeam).
+  async function saveMySquad() {
+    try {
+      saveSquad(team.id, team.gw, [...starters.map((id) => ({ id, starter: true })), ...bench.map((id) => ({ id, starter: false }))]);
+      await loadTeam(team.id);
+      flash("Squad saved: transfers you make on FPL will be picked up from now on");
     } catch (e) { flash(e.message); }
   }
 
@@ -393,6 +404,15 @@ export default function App() {
 
   const squadMain = (hint, actions) => (
     <section className="squad-main">
+      {team?.needsSquad && (
+        <div className="squad-needed" role="status">
+          <span><b>Add your squad once.</b> FPL doesn't share squads with this hosted site, so pick your 15 players as
+            they are on FPL now ({squad.length}/15 so far). They're saved in this browser, and transfers you make on
+            FPL are picked up automatically after that.</span>
+          <button className="btn sm primary" onClick={saveMySquad}
+            disabled={squad.length !== 15 || !xiFits(starterPlayers) || spent > budget + 1e-9}>Save my squad</button>
+        </div>
+      )}
       <Summary total={total} captain={captain} spent={spent} budget={budget} team={team}
         starters={starterPlayers} bench={benchPlayers} recency={recency} />
       <div className="toolbar">

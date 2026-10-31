@@ -69,6 +69,12 @@ past deadline), and every run keeps the raw FPL API response in S3, since FPL
 doesn't archive injury flags or news. Saved transfers live in each visitor's
 browser, so the site keeps no user data.
 
+FPL refuses squad picks to cloud servers (it still serves a team's bank, rank,
+history and transfers). So on the hosted site you enter your 15 players once;
+they're saved in your browser and kept current from FPL's public transfer list.
+History and Strategy need every week's picks, so they work when you run the app
+yourself.
+
 ## Data sources
 
 | Source | Used for | Notes |

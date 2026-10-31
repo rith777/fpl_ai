@@ -12,9 +12,38 @@ const get = (path) => fetch(`/fpl/${path}`)
   .then((r) => {
     if (r.status === 404) throw new Error("no FPL team with that ID");
     if (r.status === 503) throw new Error("FPL is updating (usually around deadlines). Try again in a few minutes");
-    if (!r.ok) throw new Error(`FPL API error ${r.status}`);
+    if (!r.ok) throw Object.assign(new Error(`FPL API error ${r.status}`), { status: r.status });
     return r.json();
   });
+
+// FPL refuses squad picks to cloud servers (the hosted site's relay), though
+// it serves a team's history and transfers. A refused request reads as null.
+export const BLOCKED = 403;
+const getOrBlocked = (path) => get(path).catch((e) => { if (e.status === BLOCKED) return null; throw e; });
+
+// The squad, saved in this browser by team ID ({gw, picks: [{id, starter}]}),
+// for when FPL won't serve it: entered once, then kept current from the
+// public transfer list (squadFrom).
+const SQUAD_KEY = "fplSquads";
+const loadSquads = () => { try { return JSON.parse(localStorage.getItem(SQUAD_KEY) || "{}"); } catch { return {}; } };
+
+export function saveSquad(teamId, gw, picks) {
+  const all = { ...loadSquads(), [teamId]: { gw, picks: picks.map(({ id, starter }) => ({ id, starter })) } };
+  try { localStorage.setItem(SQUAD_KEY, JSON.stringify(all)); }
+  catch { throw new Error("couldn't save your squad: this browser blocks site storage"); }
+}
+
+// A saved squad as of gameweek `gw`: each transfer made since it was saved
+// swaps the player out for the one in, in his place in the lineup. (A Free
+// Hit's moves aren't in FPL's transfer list, so they don't apply.)
+function squadFrom(saved, transfers, gw) {
+  if (!saved) return null;
+  let picks = saved.picks;
+  for (const t of [...transfers].sort((a, b) => new Date(a.time) - new Date(b.time))) {
+    if (t.event > saved.gw && t.event <= gw) picks = picks.map((p) => (p.id === t.element_out ? { ...p, id: t.element_in } : p));
+  }
+  return picks;
+}
 
 // Recently loaded teams ({id, name, manager}, newest first) for the team-ID
 // dropdown. Kept in this browser's localStorage; a blocked store just means
@@ -60,7 +89,11 @@ function estimateFreeTransfers(history, before = Infinity) {
 // transfers (with prices paid) and each gameweek's picks.
 export async function fetchSeason(id) {
   const [history, transfers] = await Promise.all([get(`entry/${id}/history/`), get(`entry/${id}/transfers/`)]);
-  const picks = await Promise.all(history.current.map((gw) => get(`entry/${id}/event/${gw.event}/picks/`)));
+  const picks = await Promise.all(history.current.map((gw) => getOrBlocked(`entry/${id}/event/${gw.event}/picks/`)));
+  if (picks.includes(null)) {
+    throw new Error("FPL doesn't share week-by-week squads with this hosted site, so this page works when you run the app "
+      + "yourself (see the README)");
+  }
   return {
     weeks: history.current,
     chips: Object.fromEntries((history.chips || []).map((c) => [c.event, c.name])),
@@ -109,15 +142,24 @@ export function withPending(team, entry, byId) {
   return { ...team, bank, picks, ft, pending: entry.transfers };
 }
 
+// The team as of its last deadline. Its squad comes from FPL when FPL serves
+// it (and is then saved here too); otherwise from the squad saved in this
+// browser, brought up to date with the public transfer list. With neither,
+// `needsSquad` asks the manager to enter it once.
 export async function fetchTeam(id, byId) {
   const entry = await get(`entry/${id}/`);
   const gw = entry.current_event;
   if (!gw) throw new Error("This team hasn't played a gameweek yet");
-  const [picks, history, transfers] = await Promise.all([
-    get(`entry/${id}/event/${gw}/picks/`),
+  const [served, history, transfers] = await Promise.all([
+    getOrBlocked(`entry/${id}/event/${gw}/picks/`),
     get(`entry/${id}/history/`),
     get(`entry/${id}/transfers/`),
   ]);
+  const week = history.current.find((w) => w.event === gw) ?? history.current.at(-1);
+  const squad = served
+    ? served.picks.map((pk) => ({ id: pk.element, starter: pk.position <= 11 }))
+    : squadFrom(loadSquads()[id], transfers, gw);
+  if (served) try { saveSquad(id, gw, squad); } catch { /* storage blocked: FPL serves it anyway */ }
 
   // Latest purchase price per player; players never transferred in were bought
   // at their season-start price.
@@ -131,15 +173,16 @@ export async function fetchTeam(id, byId) {
     manager: `${entry.player_first_name} ${entry.player_last_name}`,
     gw,
     rank: entry.summary_overall_rank,
-    bank: picks.entry_history.bank / 10,
-    value: picks.entry_history.value / 10,
+    bank: week.bank / 10,
+    value: week.value / 10, // squad + bank, at today's prices
     ft: estimateFreeTransfers(history),
     chipsUsed: (history.chips || []).map((c) => ({ name: c.name, event: c.event })),
-    picks: picks.picks.map((pk) => {
-      const p = byId[pk.element];
+    needsSquad: !squad,
+    picks: (squad ?? []).map((pk) => {
+      const p = byId[pk.id];
       const now = p?.price ?? 0;
-      const paid = bought[pk.element] ?? Math.round((now - (p?.cost_change_start ?? 0)) * 10) / 10;
-      return { id: pk.element, starter: pk.position <= 11, bought: paid, selling: sellingPrice(paid, now) };
+      const paid = bought[pk.id] ?? Math.round((now - (p?.cost_change_start ?? 0)) * 10) / 10;
+      return { ...pk, bought: paid, selling: sellingPrice(paid, now) };
     }),
   };
 }

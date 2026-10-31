@@ -178,6 +178,13 @@ export default function ThisWeek(props) {
       <Deadline clubs={clubs} nextGw={nextGw} total={ready ? total : null} now={now} />
       {loading && !team ? (
         <div className="loading"><span className="spinner" aria-hidden />Loading your team…</div>
+      ) : team?.needsSquad && !ready ? (
+        <section className="card tw-hero">
+          <h2>One step left: add your squad</h2>
+          <p>FPL shares your team's bank, rank and transfers with this site, but not the squad itself. Pick your 15
+            players once; they're saved in this browser, and transfers you make on FPL are picked up after that.</p>
+          <a className="btn primary" href="#/team">Add my squad →</a>
+        </section>
       ) : !ready ? (
         <Welcome {...props} />
       ) : (
