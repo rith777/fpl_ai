@@ -191,7 +191,7 @@ function YourSeason({ team, players, rule }) {
           <div><small>Strategy ({ruleName(rule)})</small><b>{theirs}</b><small>{plural(sum(rows.map((r) => r.moves.length)), "transfer")}, −{sum(rows.map((r) => r.hits)) * 4} in hits</small></div>
           <div><small>Strategy minus you</small><b className={theirs > mine ? "down" : "up"}>{signed(theirs - mine)}</b>
             <small>± {se.toFixed(0)}: {Math.abs(theirs - mine) <= se ? "inside the week-to-week noise" : theirs > mine ? "the strategy did better" : "you did better"}</small></div>
-          <div><small>Same captain</small><b>{rows.filter((r) => r.myCaptain?.player_id === r.captain?.player_id).length} of {rows.length}</b><small>weeks</small></div>
+          {!data.season.estimated && <div><small>Same captain</small><b>{rows.filter((r) => r.myCaptain?.player_id === r.captain?.player_id).length} of {rows.length}</b><small>weeks</small></div>}
         </div>
       )}
       {status && <div className="loading"><span className="spinner" aria-hidden />{status}</div>}
@@ -213,7 +213,7 @@ function YourSeason({ team, players, rule }) {
                     <td><div className="hx-moves">{r.chip === "wildcard" || r.chip === "freehit" ? <span>{r.moves.length} changes</span> : r.moves.length ? <Moves moves={r.moves} /> : <span className="faint">rolled</span>}{r.hits > 0 && <small className="hx-hit">−{r.hits * 4}</small>}</div>
                       <small className="faint">C {r.captain?.player_name}</small></td>
                     <td><div className="hx-moves">{r.chip === "wildcard" || r.chip === "freehit" ? <span>rebuilt</span> : r.myMoves.length ? <Moves moves={r.myMoves} /> : <span className="faint">rolled</span>}{r.myHits > 0 && <small className="hx-hit">−{r.myHits}</small>}</div>
-                      <small className="faint">C {r.myCaptain?.player_name}</small></td>
+                      {r.myCaptain && <small className="faint">C {r.myCaptain.player_name}</small>}</td>
                   </tr>
                 );
               })}
@@ -225,12 +225,14 @@ function YourSeason({ team, players, rule }) {
         The strategy starts from your squad, bank and free transfers at the point chosen above (after your Wildcard
         by default, so both sides start from the same rebuilt squad), decides each week only from the projections at
         that deadline (the same ones the History page grades on), and plays your later chips in the same weeks: its own
-        captain on a Triple Captain, and on a Wildcard its best single swaps made one after another with free transfers
-        (a simpler rebuild than a full squad search, so it undersells the chip). Both sides are then scored on what
+        captain on a Triple Captain, and on a Wildcard its best swaps made one after another with free transfers
+        (single moves, then pairs priced together: close to, but short of, a full squad search). Both sides are then scored on what
         players really scored. Over a handful of weeks luck dominates (the ± is the week-to-week spread), so this says
         how the two approaches have gone, not which is better; past seasons below are the better test. Your points are
         FPL's own,
         net of hits; the strategy's use FPL's autosub and vice-captain rules.
+        {data?.season.estimated && <> FPL doesn't share week-by-week squads with this hosted site, so your squads are
+          worked back from the squad saved in this browser through your transfers, and your captains aren't known.</>}
       </Explainer>
     </section>
   );

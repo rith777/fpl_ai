@@ -22,13 +22,17 @@ function gradeWeek(gw, hist, season, meta) {
   const prev = season.weeks.find((w) => w.event === gw - 1);
   const chip = season.chips[gw];
   const result = { gw, week, prev, chip };
-  if (!hist.gws[gw] || !season.picks[gw - 1]) return result;
+  // A Free Hit squad isn't in the transfer list, so worked-back squads can't grade it.
+  if (chip === "freehit" && season.estimated) return { ...result, note: "Free Hit squad: FPL doesn't share it with this hosted site." };
+  // After a Free Hit the squad goes back to the one held before it.
+  const held = season.chips[gw - 1] === "freehit" && !season.estimated ? gw - 2 : gw - 1;
+  if (!hist.gws[gw] || !season.picks[held]) return result;
 
   const poolMap = poolAt(hist.gws[gw], hist.fields, meta, horizon());
   const pool = [...poolMap.values()];
   // No matches yet to project from: expected to score nothing.
   const at = (id) => poolMap.get(id) ?? { ...meta(id), xp_next: 0, xp_h: 0, start_prob: 0, play_h: 0, pts_if_play: 0, form: 0, selected_by_percent: 0 };
-  const before = season.picks[gw - 1].map((pk) => at(pk.element));
+  const before = season.picks[held].map((pk) => at(pk.element));
   const picks = season.picks[gw];
   const after = picks.map((pk) => at(pk.element));
   const moves = season.transfers.filter((t) => t.event === gw)
@@ -54,6 +58,7 @@ function gradeWeek(gw, hist, season, meta) {
     result.roll = rollCheck({ plan, freeTransfers, squad: before });
   }
   result.moves = moves;
+  if (season.estimated) return result; // no captain or lineup without FPL's picks
 
   // Captain: the armband against the XI's top projection for that week.
   const starters = picks.filter((pk) => pk.position <= 11).map((pk) => at(pk.element));
@@ -169,7 +174,7 @@ function Week({ w, i, band }) {
       </header>
 
       {!w.moves ? (
-        <p className="hint">{w.gw === 1 ? "Initial squad: no matches this season to project from yet." : "No projections saved for this week."}</p>
+        <p className="hint">{w.note ?? (w.gw === 1 ? "Initial squad: no matches this season to project from yet." : "No projections saved for this week.")}</p>
       ) : (
         <>
           <ul className="hx-lines">
@@ -229,6 +234,7 @@ function Week({ w, i, band }) {
 export default function History({ team, players }) {
   const [weeks, setWeeks] = useState([]);
   const [status, setStatus] = useState(null);
+  const [estimated, setEstimated] = useState(false);
 
   useEffect(() => {
     if (!team) return undefined;
@@ -243,6 +249,7 @@ export default function History({ team, players }) {
         if (!hist) throw new Error("no saved projections: run `python main.py history`");
         const byId = Object.fromEntries(players.map((p) => [p.player_id, identity(p)]));
         const meta = (id) => byId[id] ?? { player_id: id };
+        setEstimated(season.estimated);
         const out = [];
         for (const w of season.weeks) {
           await tick(); // keep the page responsive between weeks
@@ -277,11 +284,16 @@ export default function History({ team, players }) {
           <div><small>Points · rank</small><b>{last ? `${last.total_points} · ${last.overall_rank?.toLocaleString()}` : "—"}</b></div>
           <div><small>Transfer weeks · good / average / bad</small><b className="hx-tally">{tally(count(transferTiers))}</b>
             <small>yours {signed(sum((w) => w.best && w.yours))} pts/GW, best plans {signed(sum((w) => w.best && (w.moves.length || w.roll?.use ? w.best.gain : 0)))}</small></div>
-          <div><small>Captaincy</small><b className="hx-tally">{tally(count(graded.filter((w) => w.captain).map((w) => lossVerdict(w.captain.lost, band))))}</b>
-            <small>{signed(-sum((w) => w.captain?.lost))} expected pts vs the top pick</small></div>
-          <div><small>Lineups</small><b className="hx-tally">{tally(count(graded.filter((w) => w.lineup).map((w) => lossVerdict(w.lineup.gain, band))))}</b>
-            <small>{signed(-sum((w) => w.lineup?.gain))} expected pts vs the best XI</small></div>
+          {!estimated && <>
+            <div><small>Captaincy</small><b className="hx-tally">{tally(count(graded.filter((w) => w.captain).map((w) => lossVerdict(w.captain.lost, band))))}</b>
+              <small>{signed(-sum((w) => w.captain?.lost))} expected pts vs the top pick</small></div>
+            <div><small>Lineups</small><b className="hx-tally">{tally(count(graded.filter((w) => w.lineup).map((w) => lossVerdict(w.lineup.gain, band))))}</b>
+              <small>{signed(-sum((w) => w.lineup?.gain))} expected pts vs the best XI</small></div>
+          </>}
         </div>
+        {estimated && <p className="hint">FPL doesn't share week-by-week squads with this hosted site, so each week's
+          squad is worked back from the one saved in this browser through your transfers. Transfers are graded; captaincy
+          and lineups aren't public, so they're graded only when you run the app yourself.</p>}
         <Explainer summary="How weeks are graded">
           Each week is graded on what the model projected before its deadline: a model fitted on past seasons, fed only
           this season's matches played by then. No hindsight: real points and rank are shown for context but never used

@@ -105,20 +105,52 @@ function estimateFreeTransfers(history, before = Infinity) {
   return ft;
 }
 
+// Each week's 15 ([{element}]) worked back from the squad saved in this browser
+// through the public transfer list, newest first: each transfer of a week
+// undone takes that week's squad to the week before's. No captain or lineup
+// (FPL only publishes those with the picks), and a Free Hit week shows the
+// squad held, since its moves aren't in the transfer list. Null if the list
+// doesn't fit the saved squad.
+function squadsFrom(saved, transfers, weeks) {
+  const last = weeks.at(-1);
+  let ids = squadFrom(saved, transfers, last)?.map((p) => p.id);
+  if (!ids) return null;
+  const out = {};
+  const newestFirst = [...transfers].sort((a, b) => new Date(b.time) - new Date(a.time));
+  for (const gw of [...weeks].reverse()) {
+    out[gw] = ids.map((element) => ({ element }));
+    for (const t of newestFirst.filter((x) => x.event === gw)) {
+      if (!ids.includes(t.element_in)) return null;
+      ids = ids.map((x) => (x === t.element_in ? t.element_out : x));
+    }
+  }
+  return out;
+}
+
 // Everything public about a manager's season so far: week-by-week results,
-// transfers (with prices paid) and each gameweek's picks.
+// transfers (with prices paid) and each gameweek's picks. When FPL won't serve
+// the picks, the squads come from squadsFrom instead (`estimated`).
 export async function fetchSeason(id) {
-  const [history, transfers] = await Promise.all([get(`entry/${id}/history/`), get(`entry/${id}/transfers/`)]);
-  const picks = await Promise.all(history.current.map((gw) => getOrBlocked(`entry/${id}/event/${gw.event}/picks/`)));
-  if (picks.includes(null)) {
-    throw new Error("FPL doesn't share week-by-week squads with this hosted site, so this page works when you run the app "
-      + "yourself (see the README)");
+  const stale = new Set();
+  const [history, transfers] = await Promise.all([getKept(`entry/${id}/history/`, stale), getKept(`entry/${id}/transfers/`, stale)]);
+  const weeks = history.current.map((w) => w.event);
+  const served = await Promise.all(weeks.map((gw) => getOrBlocked(`entry/${id}/event/${gw}/picks/`)));
+  const estimated = served.includes(null);
+  const picks = estimated ? squadsFrom(loadSquads()[id], transfers, weeks)
+    : Object.fromEntries(weeks.map((gw, i) => [gw, served[i].picks]));
+  if (!picks) {
+    throw new Error(loadSquads()[id]
+      ? "FPL doesn't share week-by-week squads with this hosted site, and your saved squad doesn't match your transfer "
+        + "list. Re-enter your squad on My Team"
+      : "FPL doesn't share week-by-week squads with this hosted site. Enter your squad once on My Team and this page "
+        + "works it out from your transfers");
   }
   return {
     weeks: history.current,
     chips: Object.fromEntries((history.chips || []).map((c) => [c.event, c.name])),
     transfers: [...transfers].sort((a, b) => new Date(a.time) - new Date(b.time)),
-    picks: Object.fromEntries(history.current.map((gw, i) => [gw.event, picks[i].picks])),
+    picks,
+    estimated,
     freeTransfersAt: (gw) => estimateFreeTransfers(history, gw),
   };
 }

@@ -72,8 +72,9 @@ browser, so the site keeps no user data.
 FPL refuses squad picks to cloud servers (it still serves a team's bank, rank,
 history and transfers). So on the hosted site you enter your 15 players once;
 they're saved in your browser and kept current from FPL's public transfer list.
-History and Strategy need every week's picks, so they work when you run the app
-yourself.
+History and Strategy work each week's squad back from that saved squad through
+the transfer list; captains, lineups and Free Hit squads aren't public, so those
+are graded only when you run the app yourself.
 
 ## Data sources
 
