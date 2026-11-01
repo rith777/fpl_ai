@@ -190,7 +190,7 @@ em.hit { background: rgba(255, 40, 130, 0.2); color: #ff7ab0; margin-left: 6px; 
 
 /* ---------- header ---------- */
 .topbar {
-  position: sticky; top: 0; z-index: 30;
+  position: sticky; top: 0; z-index: 30; padding-top: env(safe-area-inset-top); /* below the phone's status bar */
   background: linear-gradient(90deg, #37003c 0%, #4d0b55 55%, #2b0536 100%);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
 }
@@ -831,7 +831,7 @@ h1 .beta { font-size: 11px; margin-left: 10px; }
 .more:hover { color: var(--green); }
 .hint .more { margin: 0 0 0 4px; }
 .site-footer {
-  width: 100%; max-width: 1440px; margin: 0 auto; padding: 28px 20px 40px; display: flex; flex-wrap: wrap; gap: 24px 48px;
+  width: 100%; max-width: 1440px; margin: 0 auto; padding: 28px 20px calc(40px + env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; gap: 24px 48px;
   justify-content: space-between; border-top: 1px solid var(--line);
 }
 .sf-about { max-width: 420px; }
