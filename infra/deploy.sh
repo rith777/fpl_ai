@@ -4,6 +4,7 @@
 #   infra/deploy.sh models       upload trained models (data/models) for the scheduled refresh
 #   infra/deploy.sh pull-models  download them (the scheduled refresh does this first)
 #   infra/deploy.sh snapshots    upload the raw FPL API snapshots (data/raw/snapshots)
+#   infra/deploy.sh pull-data    download the published data JSON (the refresh checks new data against it)
 #   infra/deploy.sh site         build the web app and publish it
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -30,6 +31,9 @@ case "${1:-}" in
   snapshots)
     aws s3 sync data/raw/snapshots "s3://$(out DataBucket)/raw"
     ;;
+  pull-data)
+    for f in players teams history; do aws s3 cp "s3://$(out SiteBucket)/$f.json" web/public/; done
+    ;;
   site)
     (cd web && npm run build)
     bucket=$(out SiteBucket)
@@ -43,7 +47,7 @@ case "${1:-}" in
     echo "Published: $(out SiteUrl)"
     ;;
   *)
-    sed -n '2,7p' "$0"
+    sed -n '2,8p' "$0"
     exit 1
     ;;
 esac

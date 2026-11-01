@@ -554,6 +554,40 @@ def _snapshot_raw(api):
     dest.write_bytes(gzip.compress(json.dumps(api.bootstrap()).encode()))
 
 
+def _club_shifts(before, after, team_of):
+    """Per club, the average change in its regulars' (chance > 50% before)
+    chance of playing next gameweek."""
+    regular = [pid for pid, sp in before.items() if sp > 0.5 and pid in after and pid in team_of]
+    shift = pd.Series({pid: after[pid] - before[pid] for pid in regular}, dtype=float)
+    return shift.groupby(pd.Series({pid: team_of[pid] for pid in regular})).mean()
+
+
+def _drift_problems(players, teams):
+    """Clubs whose regulars' chance of playing moved further since the last
+    export than any club's has between two deadlines this season (history.json).
+    News moves players one at a time; a whole club moving at once is broken data
+    (as when FPL's unplayed fixtures were read as missed matches). Checked only
+    against an export from this gameweek or the one before."""
+    files = [WEB_PUBLIC / f for f in ("players.json", "teams.json", "history.json")]
+    if not all(f.exists() for f in files):
+        return []
+    last, last_teams, history = (json.loads(f.read_text()) for f in files)
+    if teams["current_gw"] - last_teams.get("current_gw", -9) not in (0, 1):
+        return []
+    team_of = dict(zip(players["player_id"], players["team"]))
+    at = {int(gw): {r[0]: r[history["fields"].index("start_prob")] for r in rows}
+          for gw, rows in history["gws"].items()}
+    gws = sorted(at)
+    seen = [_club_shifts(at[a], at[b], team_of).abs().max() for a, b in zip(gws, gws[1:])]
+    if not seen:
+        return []
+    now = _club_shifts({p["player_id"]: p["start_prob"] for p in last},
+                       dict(zip(players["player_id"], players["start_prob"])), team_of)
+    moved = now[now.abs() > max(seen)]
+    return [f"{club}'s regulars' chance of playing moved {d:+.2f} since the last export "
+            f"(the most between two deadlines this season: {max(seen):.2f})" for club, d in moved.items()]
+
+
 def _check_export(players, teams):
     """What the published files must satisfy, like a data test: a broken FPL
     response or model run stops here instead of reaching the site."""
@@ -572,6 +606,7 @@ def _check_export(players, teams):
         problems.append("players at clubs missing from teams.json")
     if teams["deadline"] and datetime.fromisoformat(teams["deadline"].replace("Z", "+00:00")) < datetime.now(timezone.utc):
         problems.append(f"next deadline {teams['deadline']} is in the past")
+    problems += _drift_problems(players, teams)
     if problems:
         raise SystemExit("export stopped, nothing written: " + "; ".join(problems))
 

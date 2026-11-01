@@ -38,11 +38,14 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: eu-central-1
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt pytest
       - run: npm ci
         working-directory: web
       - run: infra/deploy.sh pull-models
-      # export stops (and so does this job) if its checks fail: the site keeps the last good data.
+      - run: infra/deploy.sh pull-data
+      - run: python -m pytest tests -q
+      # export stops (and so does this job) if its checks fail: the site keeps the last good data,
+      # and GitHub emails the repository owner about the failed run.
       - run: python main.py export
       - run: python main.py history
       - run: infra/deploy.sh snapshots

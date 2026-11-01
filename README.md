@@ -65,7 +65,9 @@ infra/deploy.sh site      # build and publish the app
 Set the printed role ARN as the GitHub repository variable `AWS_ROLE_ARN`;
 `.github/workflows/refresh.yml` then re-scores players every 6 hours. The export
 refuses to publish if its checks fail (missing projections, unknown clubs, a
-past deadline), and every run keeps the raw FPL API response in S3, since FPL
+past deadline, or a club's whole side moving further since the last export
+than any club has between two deadlines this season: news moves players one at
+a time, broken data moves them together), and every run keeps the raw FPL API response in S3, since FPL
 doesn't archive injury flags or news. Saved transfers live in each visitor's
 browser, so the site keeps no user data.
 
