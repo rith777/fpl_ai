@@ -1,16 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { fetchSeason } from "../fpl.js";
-import { identity, playSeason } from "../strategy.js";
-import { horizon } from "../transfers.js";
-import { Explainer, Segmented, Shirt } from "./ui.jsx";
+import { identity } from "../strategy.js";
+import { HIT_COST, horizon } from "../transfers.js";
+import { gradeWeek } from "./History.jsx";
+import { Explainer, Shirt } from "./ui.jsx";
 
-const CHIP_NAMES = { bboost: "Bench Boost", "3xc": "Triple Captain", wildcard: "Wildcard", freehit: "Free Hit" };
 const signed = (x, d = 0) => `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(d)}`;
 const tick = () => new Promise((r) => setTimeout(r));
 const sameRule = (a, b) => a && b && a.horizon === b.horizon && a.minGain === b.minGain;
 const ruleName = (s) => `plan ${s.horizon} GW${s.horizon > 1 ? "s" : ""} ahead, ${s.minGain ? `move only for +${s.minGain}/GW or more` : "make any move that adds points"}`;
 const sum = (xs) => xs.reduce((t, x) => t + x, 0);
-const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const rounded = (x) => Math.round(x).toLocaleString();
 
@@ -94,104 +93,89 @@ const Moves = ({ moves }) => moves.map((m, i) => (
   </span>
 ));
 
-// The strategy played from the manager's own squad, with the manager's chips
-// in the same weeks, against what the manager really scored. It starts from
-// the GW1 squad or from the squad right after a Wildcard (`from`), so both
-// sides set off with the same 15, bank and free transfers.
-function YourSeason({ team, players, rule }) {
-  const [data, setData] = useState(null);
-  const [from, setFrom] = useState(null); // null: after the latest Wildcard, else GW1
+// Each gameweek, from your own squad, bank and free transfers at its
+// deadline: the move the model would have made (the plan History grades)
+// against the move you made, both scored on what really happened: points the
+// players brought in scored minus the players sold, over the next H gameweeks,
+// less hits. And the captains, on that week's points. Every week starts from
+// your real squad, so this grades the model's calls, not a season-long strategy.
+function YourMoves({ team, players }) {
   const [rows, setRows] = useState([]);
   const [status, setStatus] = useState(null);
+  const [estimated, setEstimated] = useState(false);
 
   useEffect(() => {
     if (!team) return undefined;
     let live = true;
-    setData(null); setFrom(null); setStatus("Loading your season…");
-    Promise.all([
-      fetch("history.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)),
-      fetchSeason(team.id),
-    ]).then(([hist, season]) => {
-      if (!live) return;
-      if (!hist?.actual) throw new Error("no saved projections: run `python main.py history`");
-      setData({ hist, season });
-    }).catch((e) => live && setStatus(`Couldn't load your season: ${e.message}.`));
-    return () => { live = false; };
-  }, [team?.id]);
-
-  const wildcards = data ? Object.entries(data.season.chips).filter(([, c]) => c === "wildcard").map(([gw]) => Number(gw)) : [];
-  const start = from ?? (wildcards.length ? Math.max(...wildcards) : 1);
-
-  useEffect(() => {
-    if (!data || !rule) return undefined;
-    let live = true;
     (async () => {
-      setRows([]); setStatus("Playing the strategy through your season…");
+      setRows([]); setStatus("Loading your season…");
       try {
-        const { hist, season } = data;
+        const [hist, season] = await Promise.all([
+          fetch("history.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)),
+          fetchSeason(team.id),
+        ]);
+        if (!hist?.actual) throw new Error("no saved projections: run `python main.py history`");
+        setEstimated(season.estimated);
         const byId = Object.fromEntries(players.map((p) => [p.player_id, identity(p)]));
         const meta = (id) => byId[id] ?? { player_id: id };
-        // What the manager paid for each player held at the start: his latest
-        // purchase by then, else the season-start price.
-        const paid = {};
-        for (const t of season.transfers) if (t.event <= start) paid[t.element_in] = t.element_in_cost / 10;
-        const startPrice = (id) => paid[id] ?? Math.round(((byId[id]?.now ?? 0) - (byId[id]?.cost_change_start ?? 0)) * 10) / 10;
-        const ids = season.picks[start].map((pk) => pk.element);
-        const done = new Set(season.weeks.map((w) => w.event));
-        const weeks = Object.keys(hist.gws).map(Number).filter((gw) => gw > start && done.has(gw) && hist.actual[gw]).sort((a, b) => a - b)
-          .map((gw) => ({ gw, rows: hist.gws[gw], actual: new Map(hist.actual[gw].map(([id, pts, mins]) => [id, [pts, mins]])) }));
-        const startState = {
-          ids, bought: Object.fromEntries(ids.map((id) => [id, startPrice(id)])),
-          bank: season.weeks.find((w) => w.event === start).bank / 10, ft: season.freeTransfersAt(start + 1),
-        };
-        const chips = Object.fromEntries(Object.entries(season.chips).filter(([gw]) => Number(gw) > start));
+        // Finished gameweeks only (the report card's): a week in progress has partial points.
+        const finished = new Set((hist.report ?? []).map((r) => r.gw));
+        const scored = Object.fromEntries(Object.entries(hist.actual).filter(([gw]) => finished.has(Number(gw)))
+          .map(([gw, rs]) => [gw, new Map(rs.map(([id, pts]) => [id, pts]))]));
+        const H = horizon();
         const out = [];
-        for (const w of playSeason({ weeks, fields: hist.fields, meta, start: startState, strategy: rule, chips })) {
-          const week = season.weeks.find((x) => x.event === w.gw);
-          const picks = season.picks[w.gw];
-          const cap = picks.find((pk) => pk.is_captain);
-          out.push({
-            ...w, mine: week.points - week.event_transfers_cost, myHits: week.event_transfers_cost,
-            myMoves: w.chip === "wildcard" || w.chip === "freehit" ? []
-              : season.transfers.filter((t) => t.event === w.gw).map((t) => ({ out: meta(t.element_out), in: meta(t.element_in) })),
-            myCaptain: cap && meta(cap.element),
-          });
-          setRows([...out]);
+        for (const w of season.weeks) {
           await tick();
           if (!live) return;
+          const g = gradeWeek(w.event, hist, season, meta);
+          if (!g.best || !scored[w.event]) continue; // GW1, chip rebuilds, weeks not played yet
+          const window = Array.from({ length: H }, (_, i) => w.event + i).filter((gw) => scored[gw]);
+          const pts = (p) => sum(window.map((gw) => scored[gw].get(p.player_id) ?? 0));
+          const worth = (moves, hits) => sum(moves.map((m) => pts(m.in) - pts(m.out))) - hits;
+          const uses = !g.roll || g.roll.use;
+          const modelMoves = uses ? g.best.plan.flatMap((it) => it.moves) : [];
+          const modelHits = uses ? sum(g.best.plan.map((it) => it.hits)) * HIT_COST : 0;
+          const myHits = w.event_transfers_cost;
+          const same = modelMoves.length === g.moves.length
+            && modelMoves.every((m) => g.moves.some((x) => x.in.player_id === m.in.player_id && x.out.player_id === m.out.player_id));
+          const capPts = (p) => p && (scored[w.event].get(p.player_id) ?? 0);
+          out.push({
+            gw: w.event, window: window.length, same,
+            mine: { moves: g.moves, hits: myHits, pts: worth(g.moves, myHits) },
+            model: { moves: modelMoves, hits: modelHits, pts: worth(modelMoves, modelHits) },
+            captain: g.captain && { mine: g.captain.captain, model: g.captain.ranked[0],
+              diff: capPts(g.captain.ranked[0]) - capPts(g.captain.captain) },
+          });
+          setRows([...out]);
         }
         setStatus(null);
       } catch (e) {
-        if (live) setStatus(`Couldn't play your season: ${e.message}.`);
+        if (live) setStatus(`Couldn't load your season: ${e.message}.`);
       }
     })();
     return () => { live = false; };
-  }, [data, players, rule?.horizon, rule?.minGain, start]);
+  }, [team?.id, players]);
 
-  if (!team) return <section className="card empty-card"><p>Load your team (top right) to see the strategy played from your squad.</p></section>;
+  if (!team) return <section className="card empty-card"><p>Load your team (top right) to compare your moves with the model's.</p></section>;
 
-  const mine = sum(rows.map((r) => r.mine)), theirs = sum(rows.map((r) => r.points));
-  const diffs = rows.map((r) => r.points - r.mine);
-  const mean = diffs.length ? sum(diffs) / diffs.length : 0;
-  const se = diffs.length > 1 ? Math.sqrt(sum(diffs.map((d) => (d - mean) ** 2)) / (diffs.length - 1)) * Math.sqrt(diffs.length) : 0;
-  const first = rows[0]?.gw, last = rows[rows.length - 1]?.gw;
-  let running = 0;
+  const H = horizon();
+  const diffs = rows.map((r) => r.model.pts - r.mine.pts);
+  const total = sum(diffs);
+  const se = diffs.length > 1 ? Math.sqrt(sum(diffs.map((d) => (d - total / diffs.length) ** 2)) / (diffs.length - 1)) * Math.sqrt(diffs.length) : 0;
+  const caps = rows.filter((r) => r.captain && r.captain.mine.player_id !== r.captain.model.player_id);
+  const capTotal = sum(caps.map((r) => r.captain.diff));
+  const verdict = (d) => (d > 0 ? "down" : d < 0 ? "up" : "");
   return (
     <section className="card">
-      <div className="card-head">
-        <h2>Your season vs the strategy</h2>
-        {wildcards.length > 0 && (
-          <Segmented value={start} onChange={setFrom}
-            options={[{ value: 1, label: "From GW1" }, ...wildcards.map((gw) => ({ value: gw, label: `After your Wildcard (GW${gw})` }))]} />
-        )}
-      </div>
+      <div className="card-head"><h2>Your moves vs the model's</h2></div>
       {rows.length > 0 && (
         <div className="hx-summary">
-          <div><small>You, GW{first}–{last}</small><b>{mine}</b><small>{plural(sum(rows.map((r) => r.myMoves.length)), "transfer")}, −{sum(rows.map((r) => r.myHits))} in hits</small></div>
-          <div><small>Strategy ({ruleName(rule)})</small><b>{theirs}</b><small>{plural(sum(rows.map((r) => r.moves.length)), "transfer")}, −{sum(rows.map((r) => r.hits)) * 4} in hits</small></div>
-          <div><small>Strategy minus you</small><b className={theirs > mine ? "down" : "up"}>{signed(theirs - mine)}</b>
-            <small>± {se.toFixed(0)}: {Math.abs(theirs - mine) <= se ? "inside the week-to-week noise" : theirs > mine ? "the strategy did better" : "you did better"}</small></div>
-          {!data.season.estimated && <div><small>Same captain</small><b>{rows.filter((r) => r.myCaptain?.player_id === r.captain?.player_id).length} of {rows.length}</b><small>weeks</small></div>}
+          <div><small>Weeks the model's move would have scored more</small><b>{diffs.filter((d) => d > 0).length} of {rows.length}</b>
+            <small>yours scored more in {diffs.filter((d) => d < 0).length}; the same moves in {rows.filter((r) => r.same).length}</small></div>
+          <div><small>Model's moves minus yours</small><b className={verdict(total)}>{signed(total)}</b>
+            <small>pts over the {H} GWs after each deadline · ± {se.toFixed(0)}: {Math.abs(total) <= se ? "inside the noise" : total > 0 ? "the model's calls did better" : "your calls did better"}</small></div>
+          {!estimated && caps.length > 0 && <div><small>Captain, where you differed ({caps.length} GWs)</small><b className={verdict(capTotal)}>{signed(capTotal)}</b>
+            <small>the model's pick minus yours, that week's points</small></div>}
         </div>
       )}
       {status && <div className="loading"><span className="spinner" aria-hidden />{status}</div>}
@@ -199,56 +183,53 @@ function YourSeason({ team, players, rule }) {
         <div className="st-table-wrap">
           <table className="st-table st-weeks">
             <thead>
-              <tr><th>GW</th><th className="num">You</th><th className="num">Strategy</th><th className="num">Running</th><th>Strategy's moves · captain</th><th>Your moves · captain</th></tr>
+              <tr><th>GW</th><th>Your move</th><th className="num">Pts</th><th>Model's move</th><th className="num">Pts</th><th className="num">Model − you</th></tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
-                running += r.points - r.mine;
-                return (
-                  <tr key={r.gw}>
-                    <td>{r.gw}{r.chip && <span className="st-tag">{CHIP_NAMES[r.chip]}</span>}</td>
-                    <td className="num">{r.mine}</td>
-                    <td className="num">{r.points}</td>
-                    <td className={`num ${running > 0 ? "down" : running < 0 ? "up" : ""}`}>{signed(running)}</td>
-                    <td><div className="hx-moves">{r.chip === "wildcard" || r.chip === "freehit" ? <span>{r.moves.length} changes</span> : r.moves.length ? <Moves moves={r.moves} /> : <span className="faint">rolled</span>}{r.hits > 0 && <small className="hx-hit">−{r.hits * 4}</small>}</div>
-                      <small className="faint">C {r.captain?.player_name}</small></td>
-                    <td><div className="hx-moves">{r.chip === "wildcard" || r.chip === "freehit" ? <span>rebuilt</span> : r.myMoves.length ? <Moves moves={r.myMoves} /> : <span className="faint">rolled</span>}{r.myHits > 0 && <small className="hx-hit">−{r.myHits}</small>}</div>
-                      {r.myCaptain && <small className="faint">C {r.myCaptain.player_name}</small>}</td>
-                  </tr>
-                );
-              })}
+              {[...rows].reverse().map((r) => (
+                <tr key={r.gw}>
+                  <td>{r.gw}{r.window < H && <small className="faint">{r.window} of {H} GWs so far</small>}</td>
+                  <td><div className="hx-moves">{r.mine.moves.length ? <Moves moves={r.mine.moves} /> : <span className="faint">rolled</span>}{r.mine.hits > 0 && <small className="hx-hit">−{r.mine.hits}</small>}</div>
+                    {r.captain && <small className="faint">C {r.captain.mine.player_name}</small>}</td>
+                  <td className="num">{signed(r.mine.pts)}</td>
+                  <td>{r.same ? <span className="faint">same as yours</span> : <div className="hx-moves">{r.model.moves.length ? <Moves moves={r.model.moves} /> : <span className="faint">roll</span>}{r.model.hits > 0 && <small className="hx-hit">−{r.model.hits}</small>}</div>}
+                    {r.captain && r.captain.model.player_id !== r.captain.mine.player_id && <small className="faint">C {r.captain.model.player_name} ({signed(r.captain.diff)})</small>}</td>
+                  <td className="num">{signed(r.model.pts)}</td>
+                  <td className={`num ${verdict(r.model.pts - r.mine.pts)}`}>{signed(r.model.pts - r.mine.pts)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
       )}
       <Explainer summary="How this comparison works">
-        The strategy starts from your squad, bank and free transfers at the point chosen above (after your Wildcard
-        by default, so both sides start from the same rebuilt squad), decides each week only from the projections at
-        that deadline (the same ones the History page grades on), and plays your later chips in the same weeks: its own
-        captain on a Triple Captain, and on a Wildcard its best swaps made one after another with free transfers
-        (single moves, then pairs priced together: close to, but short of, a full squad search). Both sides are then scored on what
-        players really scored. Over a handful of weeks luck dominates (the ± is the week-to-week spread), so this says
-        how the two approaches have gone, not which is better; past seasons below are the better test. Your points are
-        FPL's own,
-        net of hits; the strategy's use FPL's autosub and vice-captain rules.
-        {data?.season.estimated && <> FPL doesn't share week-by-week squads with this hosted site, so your squads are
-          worked back from the squad saved in this browser through your transfers, and your captains aren't known.</>}
+        Each week starts from your real squad, bank and free transfers at that deadline. The model's move is the one
+        it projected best then (the same plan the History page grades, rolling when nothing cleared the bar), made
+        before the matches it is scored on. A move's points are what the players brought in scored minus what the
+        players sold scored over the {H} gameweeks from that deadline (the span the model plans for), whether or not
+        they'd have started, less any hits; a roll scores 0. That's hindsight on purpose: it checks the model's calls
+        against what happened. History grades your moves on what was known at the time. One week is mostly luck, so the
+        count of weeks and the ± (from the spread of the weekly differences; neighbouring weeks share gameweeks, so if
+        anything it's too narrow) say more than any single row. Wildcard and Free
+        Hit weeks aren't compared.
+        {estimated && <> FPL doesn't share week-by-week squads with this hosted site, so your squads are worked back
+          from the squad saved in this browser through your transfers, and captains are compared only for weeks you set
+          one in this app.</>}
       </Explainer>
     </section>
   );
 }
 
-// The Strategy page: what works over whole past seasons, and the same
-// engine played from the manager's own squad this season.
+// The Strategy page: the model's calls against yours this season, week by
+// week, and what works over whole past seasons.
 export default function Strategy({ team, players }) {
   const [bt, setBt] = useState(undefined);
   useEffect(() => {
     fetch("strategy.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null).then(setBt);
   }, []);
-  const rule = bt === undefined ? null : bt ? bt.chosen : { horizon: horizon(), minGain: 0 };
   return (
     <div className="history strategy">
-      <YourSeason team={team} players={players} rule={rule} />
+      <YourMoves team={team} players={players} />
       <Backtest bt={bt} />
     </div>
   );

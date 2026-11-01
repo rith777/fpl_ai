@@ -17,7 +17,7 @@ const TIER = { good: "Good", ok: "Average", bad: "Bad", neutral: "" };
 const swap = (squad, moves) => squad.map((p) => moves.find((m) => m.out.player_id === p.player_id)?.in ?? p);
 
 // One gameweek graded on what was known at its deadline.
-function gradeWeek(gw, hist, season, meta) {
+export function gradeWeek(gw, hist, season, meta) {
   const week = season.weeks.find((w) => w.event === gw);
   const prev = season.weeks.find((w) => w.event === gw - 1);
   const chip = season.chips[gw];

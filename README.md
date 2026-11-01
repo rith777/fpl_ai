@@ -153,8 +153,10 @@ python main.py all         # download, features, train, export, history, backtes
   points. A strategy = how many gameweeks ahead a transfer is valued over x
   the least gain worth spending a transfer on (smaller gains are rolled). One
   replaces the app's rule only if it beats it by more than a standard error.
-  The Strategy page shows the results, and the chosen strategy played from
-  your own GW1 squad against your real season.
+  The Strategy page shows the results, and, week by week from your real
+  squad, the move the model would have made against the move you made, both
+  scored on what the players really scored over the next 3 gameweeks (plus the
+  captains where they differed).
 - `backtest` also tests when to play Triple Captain, Bench Boost and the Free
   Hit (`web/scripts/chips.mjs` -> `web/public/chips.json`): at the first
   chance, or when the week beats every later week in view and clears a bar set

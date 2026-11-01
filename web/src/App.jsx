@@ -449,7 +449,7 @@ export default function App() {
     stats: ["Statistics", `${players.length} players · projections weighted ${recencyLabel(recency).toLowerCase()}`],
     fixtures: ["Fixtures", `Gameweeks ${nextGw}+ · ${clubs.teams.length} clubs`],
     history: ["History", team ? `${team.name} · each move graded on what was known at the time` : "Your season, week by week"],
-    strategy: ["Strategy", team ? `${team.name} vs the model's strategy, and what past seasons say works` : "What past seasons say works"],
+    strategy: ["Strategy", team ? `${team.name}'s moves vs the model's, scored on real points` : "What past seasons say works"],
     about: ["How it works", "What the app does, and how it's built and tested"],
   };
   const pageInfo = PAGES.find((p) => p.id === route || p.also?.includes(route));
