@@ -251,6 +251,7 @@ export async function fetchTeam(id, byId) {
     manager: `${entry.player_first_name} ${entry.player_last_name}`,
     gw,
     rank: entry.summary_overall_rank,
+    points: entry.summary_overall_points,
     bank: week.bank / 10,
     value: week.value / 10, // squad + bank, at today's prices
     ft: estimateFreeTransfers(history),

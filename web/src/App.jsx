@@ -37,6 +37,12 @@ function xiProblem(xi) {
   return "That XI isn't allowed";
 }
 
+const FOOTER = [
+  ["Plan", [["This week", "#/home"], ["My Team", "#/team"], ["Statistics", "#/stats"], ["Fixtures", "#/fixtures"]]],
+  ["Review", [["History", "#/history"], ["Strategy", "#/strategy"]]],
+  ["Learn", [["New to FPL", "#/start"], ["About", "#/about"], ["GitHub", "https://github.com/rith777/fpl_ai"]]],
+];
+
 const savedTeamId = (() => { try { return localStorage.getItem("fplTeamId") || ""; } catch { return ""; } })();
 
 // Pages live in the URL hash (#/home, #/team, ...) so a refresh keeps your place.
@@ -454,6 +460,8 @@ export default function App() {
     start: ["New to FPL", "How the game works, in plain words, and how to join"],
     about: ["About", "Who built it, how it works, and how to read each page"],
   };
+  // The welcome screen's hero carries the title itself.
+  const welcome = route === "home" && !team && !teamLoading && squad.length < 15;
   const pageInfo = PAGES.find((p) => p.id === route || p.also?.includes(route));
   useEffect(() => { document.title = `${heads[route][0]} · FPL AI`; }, [route]);
 
@@ -519,7 +527,7 @@ export default function App() {
       <Header page={route} recency={recency} setRecency={setRecency} team={team} teamLoading={teamLoading}
         savedTeamId={savedTeamId} onLoad={loadTeam} onUnload={unloadTeam} recent={recent} />
       <main className="page" key={route}>
-        <div className="page-head">
+        {!welcome && <div className="page-head">
           <div>
             <h1>{heads[route][0]}{pageInfo?.beta && <Beta />}</h1>
             <p>{heads[route][1]}</p>
@@ -528,13 +536,23 @@ export default function App() {
             <Segmented value={route} onChange={(v) => { window.location.hash = `#/${v}`; }}
               options={[{ value: "team", label: "Pick team" }, { value: "transfers", label: "Transfers" }]} />
           )}
-        </div>
+        </div>}
         {page}
       </main>
       <footer className="site-footer">
-        <span>FPL AI is an independent project, not affiliated with the Premier League or Fantasy Premier League.
-          Projections are estimates with a margin of error.</span>
-        <span><a href="#/about">About</a> · <a href="https://github.com/rith777/fpl_ai">GitHub</a></span>
+        <div className="sf-about">
+          <b>FPL <span>AI</span></b>
+          <p>An independent project, not affiliated with the Premier League or Fantasy Premier League. Projections are
+            estimates with a margin of error.</p>
+        </div>
+        <nav className="sf-links" aria-label="Site">
+          {FOOTER.map(([group, links]) => (
+            <div key={group}>
+              <span>{group}</span>
+              {links.map(([label, href]) => <a key={label} href={href}>{label}</a>)}
+            </div>
+          ))}
+        </nav>
       </footer>
       {toast && <div className="toast" key={toast.id} role="status">{toast.msg}</div>}
     </TeamsContext.Provider>
