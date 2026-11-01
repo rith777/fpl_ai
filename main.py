@@ -838,6 +838,20 @@ def _season_fixtures(feats):
     return fixtures, names
 
 
+# A break: this many days or more without a league match (an international
+# window, a winter break or a cup weekend; a normal round gap is under a week).
+BREAK_DAYS = 9
+
+
+def _breaks(feats):
+    """Gameweeks that come after a break: the first round played once BREAK_DAYS
+    pass without any league kickoff (robust to single matches moved later)."""
+    t = feats["kickoff_time"].drop_duplicates().sort_values()
+    ends = t[t.diff() >= pd.Timedelta(days=BREAK_DAYS)]
+    first = feats.groupby("gameweek")["kickoff_time"].median()
+    return [int(first[first >= e].index.min()) for e in ends]
+
+
 def cmd_backtest(_):
     """Strategy backtest on past seasons: for each season after the first, the
     models refitted on the seasons before it project every gameweek from the
@@ -878,7 +892,7 @@ def cmd_backtest(_):
         seasons[season] = {
             "players": {int(r.player_id): [r.player_name, r.position, r.team] for r in meta.itertuples()},
             "gws": gws, "actual": {gw: _actual(feats, gw) for gw in range(2, last_gw + 1)},
-            "starts": starts,
+            "starts": starts, "breaks": _breaks(feats),
         }
         print(f"   {season}: GW2-{last_gw} projected, {len(starts)} starting squads")
     BACKTEST_STARTS_FILE.write_text(json.dumps({s: v["starts"] for s, v in seasons.items()}), encoding="utf-8")

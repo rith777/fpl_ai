@@ -175,7 +175,8 @@ export default function About() {
               {" "}{Math.round(wc.validation.gain)} ± {Math.round(wc.validation.se)} pts on held-out seasons.</>
             : <>No timing rule beat playing it at the first chance in every held-out season, so the call is yours.</>}</li>}
           <li><b>Most ideas didn't survive.</b> Last season's stats, per-90 rates, set-piece order, a keeper-only model
-            and a rules-based blend were all dropped after failing on held-out seasons.</li>
+            and a rules-based blend were all dropped after failing on held-out seasons. So was valuing a banked transfer
+            more just before an international break, though the replays can't see the injury news a break brings.</li>
         </ul>
       </section>
 

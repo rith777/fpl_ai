@@ -9,6 +9,9 @@
 // wasn't fitted on:
 // * slope[k]: the value rises with the squad's expected absences (transfers.js
 //   absences), when cover for injuries and rotation is what a banked one buys;
+// * brk[k]: the value just before a break (a round after which the league
+//   pauses for an international window, or a winter or cup weekend, within the
+//   next two gameweeks), when the news a break brings is what a banked one buys;
 // * shrink: the share of a planned move's projected gain that really came in
 //   (moves picked for the biggest projected gain are the likeliest to be
 //   over-projected), from every move the app's rule made, against what the
@@ -55,7 +58,9 @@ if (!isMainThread) {
           : forkPoints(setup, i, AHEAD, { ...played[i].before, ft }, base).weeks;
         return weeks.map((w) => (t += w.points));
       });
-      forks.push({ cum, absent: absences(played[i].squad) });
+      const breaks = input.seasons[job.season].breaks ?? [];
+      const gw = setup.weeks[i].gw;
+      forks.push({ cum, absent: absences(played[i].squad), gw, ahead: breaks.includes(gw + 1) || breaks.includes(gw + 2) });
     }
     // Each move made: its projected gain over the horizon (in less out), and
     // what the two players really scored over those weeks.
@@ -97,13 +102,27 @@ if (!isMainThread) {
     });
     return { value: [0, ...fit.map((f) => f.a)], slope: [0, ...fit.map((f) => f.b)] };
   };
-  const predict = (m, k, absent) => Math.max(0, m.value[k] + (m.slope?.[k] ?? 0) * absent);
-  const sqErr = (m, forks) => sum(ks.flatMap((k) => diffs(forks, k).map((d, i) => (d - predict(m, k, forks[i].absent)) ** 2)));
+  const predict = (m, k, f) => Math.max(0, m.value[k] + (m.slope?.[k] ?? 0) * f.absent + (m.brk?.[k] ?? 0) * f.ahead);
+  const sqErr = (m, forks) => sum(ks.flatMap((k) => diffs(forks, k).map((d, i) => (d - predict(m, k, forks[i])) ** 2)));
   const condFolds = seasons.map((season) => {
     const test = forksOf([season]);
     return { season, better: (sqErr(flat(others(season)), test) - sqErr(conditional(others(season)), test)) / test.length };
   });
   const condAdopted = condFolds.every((f) => f.better > 0);
+  const base = (from) => (condAdopted ? conditional(from) : flat(from));
+
+  // Breaks: what's left of each fork's value once the base model has its say,
+  // averaged before a break and elsewhere; the gap is the break's extra worth.
+  const withBreaks = (from) => {
+    const m = base(from), forks = forksOf(from);
+    const left = (k, ahead) => mean(forks.flatMap((f, i) => (f.ahead === ahead ? [diffs(forks, k)[i] - predict(m, k, f)] : [])));
+    return { ...m, brk: [0, ...ks.map((k) => left(k, true) - left(k, false))] };
+  };
+  const breakFolds = seasons.map((season) => {
+    const test = forksOf([season]);
+    return { season, better: (sqErr(base(others(season)), test) - sqErr(withBreaks(others(season)), test)) / test.length };
+  });
+  const breakAdopted = breakFolds.every((f) => f.better > 0);
 
   // Shrink: least squares through the origin of what came in on what was projected.
   const shrinkOf = (from) => { const m = movesOf(from); return sum(m.map((x) => x.proj * x.real)) / sum(m.map((x) => x.proj ** 2)); };
@@ -115,7 +134,7 @@ if (!isMainThread) {
   const shrinkAdopted = shrinkFolds.every((f) => f.better > 0);
 
   // The keep values the planner would use, fitted on `from`.
-  const keepOf = (from) => ({ ...(condAdopted ? conditional(from) : flat(from)), ...(shrinkAdopted ? { shrink: shrinkOf(from) } : {}) });
+  const keepOf = (from) => ({ ...(breakAdopted ? withBreaks(from) : base(from)), ...(shrinkAdopted ? { shrink: shrinkOf(from) } : {}) });
 
   const all = forksOf(seasons);
   console.log(`\n   what the k-th free transfer is worth (pts), by weeks played on (${all.length} deadlines):`);
@@ -127,6 +146,13 @@ if (!isMainThread) {
   console.log(`   per expected absence: ${ks.map((k) => `${k}: ${signed(fitted.slope[k], 2)}`).join(", ")}`
     + ` (squads expect ${mean(all.map((f) => f.absent)).toFixed(1)} absences on average); held out, error ${condFolds.map((f) => `${f.season}: ${signed(f.better, 2)}`).join("; ")}`
     + ` -> ${condAdopted ? "adopted" : "not adopted"}`);
+  const before = all.filter((f) => f.ahead), rest = all.filter((f) => !f.ahead);
+  console.log(`   before a break (${before.length} deadlines) vs not (${rest.length}): ${ks.map((k) => {
+    const [b, r] = [diffs(before, k), diffs(rest, k)];
+    return `k=${k} ${mean(b).toFixed(1)}±${seOf(b).toFixed(1)} vs ${mean(r).toFixed(1)}±${seOf(r).toFixed(1)}`;
+  }).join(", ")}`);
+  console.log(`   break term ${withBreaks(seasons).brk.slice(1).map((v, i) => `${i + 1}: ${signed(v)}`).join(", ")}; held out, error`
+    + ` ${breakFolds.map((f) => `${f.season}: ${signed(f.better, 2)}`).join("; ")} -> ${breakAdopted ? "adopted" : "not adopted"}`);
   const moves = movesOf(seasons);
   console.log(`   planned moves (${moves.length}): ${mean(moves.map((m) => m.proj)).toFixed(2)} pts projected over ${input.horizon} GWs,`
     + ` ${mean(moves.map((m) => m.real)).toFixed(2)} came in; share held up ${shrinkOf(seasons).toFixed(2)}`
@@ -154,9 +180,10 @@ if (!isMainThread) {
   const path = new URL("strategy.json", PUBLIC);
   const strategy = JSON.parse(fs.readFileSync(path, "utf8"));
   strategy.bank = {
-    value: round(keep.value), ...(keep.slope ? { slope: round(keep.slope) } : {}), ...(keep.shrink ? { shrink: Math.round(keep.shrink * 100) / 100 } : {}),
+    value: round(keep.value), ...(keep.slope ? { slope: round(keep.slope) } : {}), ...(keep.brk ? { brk: round(keep.brk) } : {}), ...(keep.shrink ? { shrink: Math.round(keep.shrink * 100) / 100 } : {}),
     ahead: AHEAD, deadlines: all.length, absent: mean(all.map((f) => f.absent)),
     conditional: { adopted: condAdopted, slope: round(fitted.slope), folds: condFolds },
+    breaks: { adopted: breakAdopted, brk: round(withBreaks(seasons).brk), folds: breakFolds },
     heldUp: { adopted: shrinkAdopted, share: shrinkOf(seasons), moves: moves.length, folds: shrinkFolds },
     folds: folds.map((f) => ({ season: f.season, gain: f.gain })), gain: mean(gains), se: seOf(gains), adopted,
   };
