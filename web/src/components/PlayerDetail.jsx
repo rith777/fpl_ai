@@ -86,6 +86,11 @@ export default function PlayerDetail({ player: p, recency, owned }) {
         </span>
         {!!p.price_change && <span className={p.price_change > 0 ? "up" : "down"}>
           Price {p.price_change > 0 ? "+" : ""}£{p.price_change.toFixed(1)}m this GW</span>}
+        {!p.price_change && p.rise_chance != null && (
+          <span className={p.rise_chance >= p.fall_chance ? "up" : "down"}
+            title="Chance of a price move before the deadline on this week's transfers so far (past seasons)">
+            {Math.round(Math.max(p.rise_chance, p.fall_chance) * 100)}% chance of a price {p.rise_chance >= p.fall_chance ? "rise" : "fall"} this GW</span>
+        )}
       </div>
       <div className="pd-fx"><span>Next 5</span><NextFixtures teamId={p.team_id} n={5} compact={false} /></div>
     </div>

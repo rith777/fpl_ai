@@ -654,6 +654,11 @@ export function contextReason(item) {
       lines.push(`The crowd agrees: managers are moving to ${m.in.player_name} (${count(crowd(m.in))} net this week) and off ${m.out.player_name} (${count(crowd(m.out))}).`);
     else if (crowd(m.in) < 0 && crowd(m.out) > 0)
       lines.push(`Against the crowd: managers are moving off ${m.in.player_name} (${count(crowd(m.in))} net this week) and onto ${m.out.player_name}.`);
+    // Price moves (chance of one this gameweek on the transfers so far, from past
+    // seasons; a price that already moved this week is past news).
+    const likely = (p, key) => !p.price_change && (p[key] ?? 0) > 0.5 ? Math.round(p[key] * 100) : null;
+    if (likely(m.in, "rise_chance")) lines.push(`${m.in.player_name}'s price is likely to rise before the deadline (${likely(m.in, "rise_chance")}%): buying early saves £0.1m.`);
+    if (likely(m.out, "fall_chance")) lines.push(`${m.out.player_name}'s price is likely to fall before the deadline (${likely(m.out, "fall_chance")}%): selling early keeps £0.1m.`);
     if (m.in.status && m.in.status !== "a") lines.push(`Flag: ${m.in.player_name} is ${m.in.status === "d" ? "a doubt" : "unavailable"}${m.in.news ? ` (${lower(m.in.news)})` : ""}.`);
     return lines;
   });

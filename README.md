@@ -52,7 +52,7 @@ A static site plus one small function, kept fresh by a scheduled job
 
 ```
 browser -> CloudFront -> S3 (app + data JSON)
-                      -> /fpl/* -> API Gateway -> Lambda -> FPL API   (read-only team endpoints)
+                      -> /fpl/* -> API Gateway -> Lambda -> FPL API   (read-only team and league endpoints)
 GitHub Actions, every 6h -> export -> checks -> S3 + raw FPL snapshot
 ```
 
@@ -126,6 +126,21 @@ python main.py all         # download, features, train, export, history, backtes
   transfers this week and injury flags. Its Chips card says when to play each
   chip, lists blank and double gameweeks for your squad, and checks what a
   Wildcard would add now.
+- History ends with the model's report card: for each finished gameweek, how
+  well the deadline projections ranked the likely starters by what they scored
+  (rank correlation), next to points per gameweek so far and FPL's own expected
+  points (from the raw snapshots, so from GW10), plus projected vs scored.
+- Price moves: the chance a player's price rises or falls this gameweek, from
+  net transfers so far and ownership (boosted trees fitted on past seasons'
+  weekly transfers and price changes; better than the base rate and a logistic
+  fit in every held-out season). Shown on the player panel, in Statistics'
+  Price movers, and as a reason to make a move early.
+- This week also shows the next 8 gameweeks (deadlines, blanks and doubles for
+  your squad, free transfers if you roll, chip windows and calls) and your
+  mini-league: where you stand and, where FPL serves rivals' squads (not to the
+  hosted site), the players most rivals own that you don't and your best
+  differentials. On the hosted site the lineup and captain you set in the app
+  each week are kept in your browser, so History can grade them.
 - `history` refits the models on past seasons only and, for each gameweek
   this season, projects players from the matches played before its deadline.
   The app's History page grades transfers, captaincy and lineups on those

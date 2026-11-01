@@ -75,7 +75,7 @@ Resources:
       MemorySize: 128
       Code:
         ZipFile: |
-          const ALLOWED = /^entry\/\d+\/(history\/|transfers\/|event\/\d+\/picks\/)?$/;
+          const ALLOWED = /^(entry\/\d+\/(history\/|transfers\/|event\/\d+\/picks\/)?|leagues-classic\/\d+\/standings\/)$/;
           exports.handler = async (event) => {
             const path = (event.rawPath || "").replace(/^\/fpl\//, "");
             if (event.requestContext?.http?.method !== "GET" || !ALLOWED.test(path)) {

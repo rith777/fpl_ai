@@ -4,6 +4,7 @@ import { CHIP_NAMES, chipsLeft } from "../rules.js";
 import { HIT_COST, horizon, model, rollCheck, transferPlan } from "../transfers.js";
 import { chipCall, tagFor } from "./TransfersPanel.jsx";
 import { TeamLoader } from "./Header.jsx";
+import League from "./League.jsx";
 import { Beta, NextFixtures, Shirt } from "./ui.jsx";
 
 // "2d 4h", "3h 12m", "8m": time to or since a moment.
@@ -145,6 +146,50 @@ function Chips({ squad, used, nextGw }) {
   );
 }
 
+// The next weeks at a glance: each deadline, where your squad blanks or plays
+// twice, free transfers if you roll, and when each open chip is due, opens or
+// runs out (the chip calls are the ones on the Chips card).
+const TIMELINE = 8;
+function Timeline({ clubs, squad, used, nextGw, ftLeft }) {
+  const teams = Object.fromEntries(clubs.teams.map((t) => [t.id, t]));
+  const deadlines = clubs.deadlines ?? {};
+  const gws = Object.keys(deadlines).map(Number).filter((g) => g >= nextGw).sort((a, b) => a - b).slice(0, TIMELINE);
+  if (gws.length < 2) return null;
+  const cap = model().max_free_transfers ?? Infinity;
+  const chips = chipsLeft(used, nextGw);
+  const marks = (gw) => chips.flatMap((c) => {
+    const name = CHIP_NAMES[c.name] ?? c.name;
+    if (gw === c.start && c.start > nextGw) return [{ text: `${name} opens`, cls: "neutral" }];
+    if (gw === c.stop) return [{ text: `${name} last week`, cls: "bad" }];
+    const call = gw >= c.start && chipCall(c.name, squad, used, nextGw);
+    if (call?.chip && gw === nextGw) return [{ text: `Play ${name}`, cls: "good" }];
+    if (call && !call.chip && call.later?.gw === gw && call.sign * call.later[call.key] > call.sign * call.now)
+      return [{ text: `${name}: best in view`, cls: "ok" }];
+    return [];
+  });
+  return (
+    <section className="card tw-card tw-wide">
+      <div className="card-head"><h2>Next {gws.length} gameweeks</h2></div>
+      <div className="tw-timeline">
+        {gws.map((gw, i) => {
+          const n = (p) => teams[p.team_id]?.matches?.[gw] ?? 1;
+          const blank = squad.filter((p) => n(p) === 0).length, double = squad.filter((p) => n(p) >= 2).length;
+          return (
+            <div key={gw} className={gw === nextGw ? "now" : ""}>
+              <b>GW{gw}</b>
+              <small>{new Date(deadlines[gw]).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}</small>
+              <span className={blank ? "down" : double ? "up" : "faint"}>
+                {blank || double ? [blank && `${blank} blank`, double && `${double} double`].filter(Boolean).join(" · ") : "15 play once"}</span>
+              <span className="faint">{Math.min(cap, ftLeft + i)} FT{i ? " if you roll" : ""}</span>
+              {marks(gw).map((m) => <em key={m.text} className={`hx-verdict ${m.cls}`}>{m.text}</em>)}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 // Without a team: what the app does, the team-ID box, and this week's top projections.
 function Welcome({ players, recency, nextGw, loading, onLoad, savedTeamId, recent }) {
   const top = useMemo(() => [...players].sort((a, b) => adjPoints(b, recency) - adjPoints(a, recency)).slice(0, 5), [players, recency]);
@@ -192,6 +237,9 @@ export default function ThisWeek(props) {
           <Lineup captain={captain} vice={vice} lineup={lineup} onBestXI={onBestXI} recency={recency} />
           <Transfer {...props} />
           {team && <Chips squad={squad} used={team.chipsUsed} nextGw={nextGw} />}
+          {team?.leagues?.length > 0 && <League team={team} squad={squad} players={props.players} captain={captain} recency={recency} />}
+          {team && <Timeline clubs={clubs} squad={squad} used={team.chipsUsed} nextGw={nextGw}
+            ftLeft={Math.max(0, props.freeTransfers - props.made)} />}
         </>
       )}
     </div>

@@ -15,7 +15,7 @@ import TransfersPanel from "./components/TransfersPanel.jsx";
 import ThisWeek from "./components/ThisWeek.jsx";
 import About from "./components/About.jsx";
 import { Beta, Segmented, TeamsContext } from "./components/ui.jsx";
-import { fetchTeam, fetchPending, savePending, saveSquad, withPending, loadRecentTeams, saveRecentTeams } from "./fpl.js";
+import { fetchTeam, fetchPending, savePending, saveSquad, saveLineup, withPending, loadRecentTeams, saveRecentTeams } from "./fpl.js";
 import { configureModel, lineupCheck, lineupPoints } from "./transfers.js";
 
 // Would adding `pos` to the current starters keep a legal XI reachable?
@@ -376,6 +376,12 @@ export default function App() {
   const total = starterPlayers.length === 11 && benchPlayers.length === 4
     ? lineupPoints(starterPlayers, benchPlayers, captain, vice, recency) : xiTotal;
   const nextGw = (clubs.current_gw ?? team?.gw ?? 0) + 1;
+  // FPL won't share picks with the hosted site: keep the lineup set here each
+  // week for History to grade.
+  useEffect(() => {
+    if (team && !team.picksServed && starters.length === 11 && bench.length === 4)
+      saveLineup(team.id, nextGw, { xi: starters, bench, captain: captainId });
+  }, [team, nextGw, starters, bench, captainId]);
   const lineup = useMemo(() => lineupCheck(squad, starterPlayers, benchPlayers, recency), [starters, bench, byId, recency]);
 
   function applyBestXI() {

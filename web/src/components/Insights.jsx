@@ -62,9 +62,13 @@ function buildInsights(players, recency, teams) {
     })));
 
   const net = (p) => p.net_transfers ?? 0;
-  add("Price movers", "Most transferred in and out this gameweek: buy risers before they go up, sell fallers before they drop.",
-    [...top(players.filter((p) => net(p) > 0), net, 3), ...top(players.filter((p) => net(p) < 0), (p) => -net(p), 2)].map((p) => ({
-      p, why: net(p) > 0 ? `▲ ${k(net(p))} net transfers in: rise likely.` : `▼ ${k(net(p))} net transfers out: drop likely.`,
+  // Chance of a price move by the deadline on this week's transfers so far,
+  // learned from past seasons' transfers and price changes.
+  const unmoved = players.filter((p) => !p.price_change);
+  const rise = (p) => p.rise_chance ?? 0, fall = (p) => p.fall_chance ?? 0;
+  add("Price movers", "Likeliest to rise or fall before the deadline on this week's transfers so far: buy risers early, sell fallers early.",
+    [...top(unmoved.filter((p) => net(p) > 0), rise, 3), ...top(unmoved.filter((p) => net(p) < 0), fall, 2)].map((p) => ({
+      p, why: net(p) > 0 ? `▲ ${k(net(p))} net transfers in: ${pct(rise(p))} chance of a rise.` : `▼ ${k(net(p))} net transfers out: ${pct(fall(p))} chance of a fall.`,
     })));
 
   // Ownership that won't be on the pitch: owned % x chance he doesn't play.

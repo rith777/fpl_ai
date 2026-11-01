@@ -53,6 +53,19 @@ export function saveSquad(teamId, gw, picks) {
   catch { throw new Error("couldn't save your squad: this browser blocks site storage"); }
 }
 
+// The XI (in order), bench order and captain set in this app for each
+// gameweek, saved in this browser by team ID when FPL won't serve picks, so
+// History can grade lineups and captains as set here ({gw: {xi, bench,
+// captain}}; captain null when left to the app's pick).
+const LINEUP_KEY = "fplLineups";
+const loadLineups = () => { try { return JSON.parse(localStorage.getItem(LINEUP_KEY) || "{}"); } catch { return {}; } };
+
+export function saveLineup(teamId, gw, lineup) {
+  const all = loadLineups();
+  all[teamId] = { ...all[teamId], [gw]: lineup };
+  try { localStorage.setItem(LINEUP_KEY, JSON.stringify(all)); } catch { /* storage blocked: nothing to grade later */ }
+}
+
 // A saved squad as of gameweek `gw`: each transfer made since it was saved
 // swaps the player out for the one in, in his place in the lineup. (A Free
 // Hit's moves aren't in FPL's transfer list, so they don't apply.)
@@ -138,6 +151,17 @@ export async function fetchSeason(id) {
   const estimated = served.includes(null);
   const picks = estimated ? squadsFrom(loadSquads()[id], transfers, weeks)
     : Object.fromEntries(weeks.map((gw, i) => [gw, served[i].picks]));
+  // Lineups set in this app, where they fit the week's worked-back squad.
+  const lineups = new Set();
+  const chips = Object.fromEntries((history.chips || []).map((c) => [c.event, c.name]));
+  for (const [gw, l] of Object.entries((estimated && picks && loadLineups()[id]) || {})) {
+    const ids = picks[gw]?.map((pk) => pk.element);
+    if (!ids || [...l.xi, ...l.bench].sort().join() !== [...ids].sort().join()) continue;
+    const armband = chips[gw] === "3xc" ? 3 : 2;
+    picks[gw] = [...l.xi, ...l.bench].map((element, i) => ({ element, position: i + 1,
+      is_captain: element === l.captain, multiplier: i >= 11 ? 0 : element === l.captain ? armband : 1 }));
+    lineups.add(Number(gw));
+  }
   if (!picks) {
     throw new Error(loadSquads()[id]
       ? "FPL doesn't share week-by-week squads with this hosted site, and your saved squad doesn't match your transfer "
@@ -147,10 +171,11 @@ export async function fetchSeason(id) {
   }
   return {
     weeks: history.current,
-    chips: Object.fromEntries((history.chips || []).map((c) => [c.event, c.name])),
+    chips,
     transfers: [...transfers].sort((a, b) => new Date(a.time) - new Date(b.time)),
     picks,
     estimated,
+    lineups,
     freeTransfersAt: (gw) => estimateFreeTransfers(history, gw),
   };
 }
@@ -231,6 +256,8 @@ export async function fetchTeam(id, byId) {
     ft: estimateFreeTransfers(history),
     chipsUsed: (history.chips || []).map((c) => ({ name: c.name, event: c.event })),
     needsSquad: !squad,
+    picksServed: !!served,
+    leagues: (entry.leagues?.classic ?? []).filter((l) => l.league_type === "x").map(({ id, name }) => ({ id, name })),
     stale: stale.size > 0,
     picks: (squad ?? []).map((pk) => {
       const p = byId[pk.id];
@@ -239,4 +266,17 @@ export async function fetchTeam(id, byId) {
       return { ...pk, bought: paid, selling: sellingPrice(paid, now) };
     }),
   };
+}
+
+// A mini-league's top 50 and, for the RIVALS nearest you in it, each one's
+// picks for gameweek `gw` where FPL serves them (not to the hosted site; null
+// when refused).
+const RIVALS = 20;
+export async function fetchLeague(leagueId, teamId, gw) {
+  const { standings } = await get(`leagues-classic/${leagueId}/standings/`);
+  const mine = standings.results.find((r) => r.entry === teamId)?.rank ?? 1;
+  const rivals = standings.results.filter((r) => r.entry !== teamId)
+    .sort((a, b) => Math.abs(a.rank - mine) - Math.abs(b.rank - mine)).slice(0, RIVALS);
+  const picks = await Promise.all(rivals.map((r) => getOrBlocked(`entry/${r.entry}/event/${gw}/picks/`).catch(() => null)));
+  return { standings: standings.results, rivals: rivals.map((r, i) => ({ ...r, picks: picks[i]?.picks ?? null })) };
 }

@@ -58,7 +58,8 @@ function gradeWeek(gw, hist, season, meta) {
     result.roll = rollCheck({ plan, freeTransfers, squad: before });
   }
   result.moves = moves;
-  if (season.estimated) return result; // no captain or lineup without FPL's picks
+  // Worked-back squads carry a lineup and captain only where you set them in this app.
+  if (season.estimated && !season.lineups.has(gw)) return result;
 
   // Captain: the armband against the XI's top projection for that week.
   const starters = picks.filter((pk) => pk.position <= 11).map((pk) => at(pk.element));
@@ -229,12 +230,74 @@ function Week({ w, i, band }) {
   );
 }
 
+// The model's own season: each finished gameweek, how well its deadline
+// projections ordered the likely starters by what they scored (rank
+// correlation: 1 = perfect order, 0 = no better than chance), next to points
+// per gameweek so far and FPL's own expected points.
+function ReportCard() {
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    fetch("history.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null))
+      .then((h) => setRows(h?.report ?? [])).catch(() => setRows([]));
+  }, []);
+  if (!rows?.length) return null;
+  const mean = (key) => {
+    const v = rows.map((r) => r[key]).filter((x) => x != null);
+    if (!v.length) return null;
+    const m = v.reduce((a, b) => a + b, 0) / v.length;
+    const se = v.length > 1 ? Math.sqrt(v.reduce((t, x) => t + (x - m) ** 2, 0) / (v.length - 1) / v.length) : 0;
+    return { m, se, n: v.length };
+  };
+  const [model, naive, fpl] = ["model", "naive", "fpl"].map(mean);
+  const beat = (key) => rows.filter((r) => r[key] != null && r.model > r[key]).length;
+  const r2 = (x) => (x == null ? "—" : x.toFixed(2));
+  return (
+    <section className="card">
+      <div className="card-head"><h2>Model report card</h2></div>
+      <div className="hx-summary">
+        <div><small>Model · ranking likely starters</small><b>{model.m.toFixed(2)}</b><small>±{model.se.toFixed(2)} over {model.n} GWs</small></div>
+        <div><small>Points per GW so far</small><b>{naive.m.toFixed(2)}</b><small>model better in {beat("naive")} of {naive.n} GWs</small></div>
+        <div><small>FPL's expected points</small><b>{fpl ? fpl.m.toFixed(2) : "—"}</b>
+          <small>{fpl ? `model better in ${beat("fpl")} of ${fpl.n} GWs` : "from GW10 (first saved before a deadline)"}</small></div>
+        <div><small>Projected · scored per likely starter</small>
+          <b>{mean("projected").m.toFixed(2)} · {mean("scored").m.toFixed(2)}</b><small>average a gameweek</small></div>
+      </div>
+      <div className="st-table-wrap">
+        <table className="st-table">
+          <thead><tr><th>GW</th><th className="num">Model</th><th className="num">So far</th><th className="num">FPL</th><th className="num">Projected</th><th className="num">Scored</th><th className="num">Players</th></tr></thead>
+          <tbody>
+            {[...rows].reverse().map((r) => (
+              <tr key={r.gw}>
+                <td>{r.gw}</td>
+                <td className={`num ${r.model > Math.max(r.naive, r.fpl ?? -1) ? "up" : ""}`}>{r2(r.model)}</td>
+                <td className="num">{r2(r.naive)}</td><td className="num">{r2(r.fpl)}</td>
+                <td className="num">{r.projected.toFixed(2)}</td><td className="num">{r.scored.toFixed(2)}</td>
+                <td className="num faint">{r.players}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Explainer summary="How the model is graded">
+        Before each deadline the model projects every player from the matches played by then (fitted on past seasons
+        only). Once the gameweek is over, the players it gave a 50%+ chance of playing are ranked by projection and by
+        what they really scored; the number is how closely the two orders agree (rank correlation: 1 is a perfect
+        order, 0 no better than chance). One gameweek is noisy, since a single goal reshuffles the order, so the season
+        average and how often the model beats each baseline say more. The baselines get the same players: points per
+        gameweek so far this season, and FPL's own expected points from the last snapshot this site saved before the
+        deadline. Projected vs scored checks the model isn't too high or too low overall.
+      </Explainer>
+    </section>
+  );
+}
+
 // Week-by-week review of a manager's season, graded only on what the model
 // knew at each deadline (no hindsight). Points and rank are shown for context.
 export default function History({ team, players }) {
   const [weeks, setWeeks] = useState([]);
   const [status, setStatus] = useState(null);
   const [estimated, setEstimated] = useState(false);
+  const [setHere, setSetHere] = useState(0); // weeks graded on lineups set in this app
 
   useEffect(() => {
     if (!team) return undefined;
@@ -250,6 +313,7 @@ export default function History({ team, players }) {
         const byId = Object.fromEntries(players.map((p) => [p.player_id, identity(p)]));
         const meta = (id) => byId[id] ?? { player_id: id };
         setEstimated(season.estimated);
+        setSetHere(season.lineups.size);
         const out = [];
         for (const w of season.weeks) {
           await tick(); // keep the page responsive between weeks
@@ -265,7 +329,14 @@ export default function History({ team, players }) {
     return () => { live = false; };
   }, [team?.id, players]);
 
-  if (!team) return <section className="card empty-card"><p>Load your team (top right) to review your season.</p></section>;
+  if (!team) {
+    return (
+      <div className="history">
+        <section className="card empty-card"><p>Load your team (top right) to review your season.</p></section>
+        <ReportCard />
+      </div>
+    );
+  }
 
   const band = sigmaGain();
   const graded = weeks.filter((w) => w.moves);
@@ -284,7 +355,7 @@ export default function History({ team, players }) {
           <div><small>Points · rank</small><b>{last ? `${last.total_points} · ${last.overall_rank?.toLocaleString()}` : "—"}</b></div>
           <div><small>Transfer weeks · good / average / bad</small><b className="hx-tally">{tally(count(transferTiers))}</b>
             <small>yours {signed(sum((w) => w.best && w.yours))} pts/GW, best plans {signed(sum((w) => w.best && (w.moves.length || w.roll?.use ? w.best.gain : 0)))}</small></div>
-          {!estimated && <>
+          {(!estimated || setHere > 0) && <>
             <div><small>Captaincy</small><b className="hx-tally">{tally(count(graded.filter((w) => w.captain).map((w) => lossVerdict(w.captain.lost, band))))}</b>
               <small>{signed(-sum((w) => w.captain?.lost))} expected pts vs the top pick</small></div>
             <div><small>Lineups</small><b className="hx-tally">{tally(count(graded.filter((w) => w.lineup).map((w) => lossVerdict(w.lineup.gain, band))))}</b>
@@ -292,8 +363,9 @@ export default function History({ team, players }) {
           </>}
         </div>
         {estimated && <p className="hint">FPL doesn't share week-by-week squads with this hosted site, so each week's
-          squad is worked back from the one saved in this browser through your transfers. Transfers are graded; captaincy
-          and lineups aren't public, so they're graded only when you run the app yourself.</p>}
+          squad is worked back from the one saved in this browser through your transfers. Transfers are graded; captains
+          and lineups aren't public, so they're graded for the weeks you set them in this app before the deadline
+          ({setHere} so far; captains where you picked one), not what you set on FPL.</p>}
         <Explainer summary="How weeks are graded">
           Each week is graded on what the model projected before its deadline: a model fitted on past seasons, fed only
           this season's matches played by then. No hindsight: real points and rank are shown for context but never used
@@ -308,6 +380,7 @@ export default function History({ team, players }) {
       </section>
       {status && <div className="loading"><span className="spinner" aria-hidden />{status}</div>}
       {[...weeks].reverse().map((w, i) => <Week key={w.gw} w={w} i={i} band={band} />)}
+      <ReportCard />
     </div>
   );
 }

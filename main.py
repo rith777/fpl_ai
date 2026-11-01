@@ -83,8 +83,35 @@ def cmd_train(_):
     trainer = ModelTrainer()
     trainer.train(pd.read_csv(FEATURES_FILE))
     trainer.save(MODELS_PATH)
+    _fit_price_model()
     for path in (PRESEASON_PATH, BACKTEST_PATH):  # refitted on the next `history` / `backtest`
         shutil.rmtree(path, ignore_errors=True)
+
+
+PRICE_MODEL = MODELS_PATH / "price_model.joblib"
+
+
+def _fit_price_model():
+    """Chance a player's price rises (falls) during a gameweek's transfer
+    window, from that window's net transfers and how many managers own him, in
+    past seasons (FPL doesn't publish its rule). Boosted trees, always more
+    likely to rise (fall) with more transfers in (out). Held out on each of
+    2023-24 to 2025-26 they beat the base rate every season (Brier 0.010 vs
+    0.021 for rises, 0.044 vs 0.050 for falls) and a logistic fit, which
+    overrated rises for the most-owned players (34% vs 15% real)."""
+    from sklearn.ensemble import HistGradientBoostingClassifier
+
+    weeks = []
+    for season in TRAINING_SEASONS:
+        rows = pd.read_csv(DATA_RAW_PATH / season / "merged_gw.csv", usecols=["element", "GW", "value", "transfers_balance", "selected"])
+        week = rows.groupby(["element", "GW"], as_index=False).first().sort_values(["element", "GW"])
+        week["moved"] = week["value"] - week.groupby("element")["value"].shift(1)
+        weeks.append(week[week["GW"] > 2].dropna(subset=["moved"]))  # GW1-2: no market yet
+    weeks = pd.concat(weeks)
+    x = weeks[["transfers_balance", "selected"]].to_numpy(float)
+    fit = lambda sign, y: HistGradientBoostingClassifier(monotonic_cst=[sign, 0], max_iter=200, learning_rate=0.05,
+                                                         min_samples_leaf=50).fit(x, y)
+    joblib.dump({"rise": fit(1, weeks["moved"] > 0), "fall": fit(-1, weeks["moved"] < 0)}, PRICE_MODEL)
 
 
 # --- live scoring -----------------------------------------------------------
@@ -244,6 +271,11 @@ def _score_players(players: pd.DataFrame, api, predictor, refresh: bool = True) 
     df["value"] = (df["xp_h"] / df["price"].clip(lower=0.1)).round(3)
     df["net_transfers"] = df["transfers_in_event"] - df["transfers_out_event"]
     df["price_change"] = df["cost_change_event"].round(1)
+    if PRICE_MODEL.exists():  # on this week's transfers so far: more before the deadline raise the odds
+        price = joblib.load(PRICE_MODEL)
+        x = np.c_[df["net_transfers"], df["selected_by_percent"] / 100 * api.bootstrap()["total_players"]]
+        for move in ("rise", "fall"):
+            df[f"{move}_chance"] = price[move].predict_proba(x)[:, 1].round(2)
     for col in ("xp_next", "xp_h", "start_prob", "play_h", "pts_if_play", "fixture_effect"):
         df[col] = df[col].round(3)
     return df
@@ -508,7 +540,7 @@ EXPORT_COLUMNS = [
     "form", "starts", "minutes", "avg_minutes", "total_points",
     "points_per_game", "selected_by_percent", "xgi_per_90",
     "xg_per_90", "xa_per_90", "on_pens", "on_fks", "on_corners", "status", "news", "cost_change_start",
-    "goals_scored", "assists", "clean_sheets", "bonus", "net_transfers", "price_change",
+    "goals_scored", "assists", "clean_sheets", "bonus", "net_transfers", "price_change", "rise_chance", "fall_chance",
     "xp_gw", "rules_next", "rules_h",
 ]
 
@@ -536,6 +568,7 @@ def _teams_payload(api) -> dict:
         t["matches"] = {int(gw): int(count.get(gw, 0)) for gw in remaining}
     upcoming = next((e for e in events if e.get("is_next")), None)
     return {"current_gw": api.current_gw(), "deadline": upcoming and upcoming["deadline_time"],
+            "deadlines": {e["id"]: e["deadline_time"] for e in events if not e["finished"] and not e["is_current"]},
             "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"), "teams": teams}
 
 
@@ -698,6 +731,44 @@ def _actual(feats, gw):
     return [[int(pid), int(pts), int(mins)] for pid, (pts, mins) in week.iterrows()]
 
 
+def _fpl_projection(gw, events):
+    """FPL's own expected points (``ep_next``) for gameweek ``gw``, from the
+    last raw snapshot taken before its deadline; None without one."""
+    import gzip
+
+    deadline = datetime.fromisoformat(events[gw - 1]["deadline_time"].replace("Z", "+00:00"))
+    taken = [(datetime.strptime(f.stem.split("_")[1].split(".")[0], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc), f)
+             for f in (SNAPSHOTS_PATH / CURRENT_SEASON).glob("bootstrap_*.json.gz")]
+    before = [(t, f) for t, f in taken if t < deadline]
+    if not before:
+        return None
+    snap = json.loads(gzip.decompress(max(before)[1].read_bytes()))
+    if next((e["id"] for e in snap["events"] if e.get("is_next")), None) != gw:
+        return None
+    return {el["id"]: float(el["ep_next"] or 0) for el in snap["elements"]}
+
+
+def _report_week(gw, rows, actual, events):
+    """How the deadline projections for gameweek ``gw`` ranked the players
+    likely to start (chance >= 50%) against what they scored, next to two
+    baselines: points per gameweek so far, and FPL's own expected points."""
+    from scipy.stats import spearmanr
+
+    i = {f: HISTORY_FIELDS.index(f) for f in ("player_id", "start_prob", "xp_gw")}
+    likely = {r[i["player_id"]]: r[i["xp_gw"]][0] for r in rows if r[i["start_prob"]] >= 0.5}
+    scored = {pid: pts for pid, pts, _ in actual[gw]}
+    so_far = {}
+    for week in range(1, gw):
+        for pid, pts, _ in actual.get(week, []):
+            so_far[pid] = so_far.get(pid, 0) + pts / (gw - 1)
+    ids = [pid for pid in likely if pid in scored]
+    real = [scored[pid] for pid in ids]
+    rank = lambda guess: round(float(spearmanr([guess.get(pid, 0) for pid in ids], real)[0]), 3)
+    fpl = _fpl_projection(gw, events)
+    return {"gw": gw, "players": len(ids), "model": rank(likely), "naive": rank(so_far), "fpl": fpl and rank(fpl),
+            "projected": round(float(np.mean([likely[pid] for pid in ids])), 2), "scored": round(float(np.mean(real)), 2)}
+
+
 def cmd_history(_):
     """Projections as they stood at each past deadline this season: the
     pre-season model fed only the matches played before it. Injury flags at the
@@ -718,7 +789,9 @@ def cmd_history(_):
         gws[gw] = _snapshot(feats, gw, fixtures, names, predictor, CURRENT_SEASON)
         print(f"   GW{gw}: {len(gws[gw])} players projected")
     actual = {gw: _actual(feats, gw) for gw in range(1, current + 1)}
-    payload = {"horizon": HORIZON, "fields": HISTORY_FIELDS, "gws": gws, "actual": actual}
+    events = api.bootstrap()["events"]
+    report = [_report_week(gw, gws[gw], actual, events) for gw in gws if events[gw - 1]["finished"]]
+    payload = {"horizon": HORIZON, "fields": HISTORY_FIELDS, "gws": gws, "actual": actual, "report": report}
     (WEB_PUBLIC / "history.json").write_text(json.dumps(payload), encoding="utf-8")
     print(f"   wrote {WEB_PUBLIC / 'history.json'}")
 
