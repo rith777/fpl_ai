@@ -63,7 +63,10 @@ infra/deploy.sh site      # build and publish the app
 ```
 
 Set the printed role ARN as the GitHub repository variable `AWS_ROLE_ARN`;
-`.github/workflows/refresh.yml` then re-scores players every 6 hours. The export
+`.github/workflows/refresh.yml` then re-scores players every 6 hours, and
+`.github/workflows/retrain.yml` refits the models every Tuesday on every match
+played so far (`python main.py retrain`; held out, refitting during the season
+ranked players better in every season tested). The export
 refuses to publish if its checks fail (missing projections, unknown clubs, a
 past deadline, or a club's whole side moving further since the last export
 than any club has between two deadlines this season: news moves players one at

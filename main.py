@@ -81,12 +81,28 @@ def cmd_train(_):
     if not FEATURES_FILE.exists():
         print("No feature dataset found. Run: python main.py features")
         return
-    trainer = ModelTrainer()
-    trainer.train(pd.read_csv(FEATURES_FILE))
-    trainer.save(MODELS_PATH)
+    _train_live()
     _fit_price_model()
     for path in (PRESEASON_PATH, BACKTEST_PATH):  # refitted on the next `history` / `backtest`
         shutil.rmtree(path, ignore_errors=True)
+
+
+def _train_live():
+    trainer = ModelTrainer()
+    trainer.train(pd.read_csv(FEATURES_FILE))
+    trainer.save(MODELS_PATH)
+
+
+def cmd_retrain(args):
+    """Refit the live models on every match played so far, this season's
+    included. Held out, refitting every 4 gameweeks ranked players better in
+    every season tested (2024-25 +0.0015, 2025-26 +0.0039, 2026-27 so far
+    +0.0002; +0.0026 ± 0.0009 over 19 four-week windows). Pre-season and
+    backtest models are fitted on past seasons only, so they stay. Run weekly
+    by .github/workflows/retrain.yml."""
+    cmd_download(args)
+    cmd_features(args)
+    _train_live()
 
 
 PRICE_MODEL = MODELS_PATH / "price_model.joblib"
@@ -322,6 +338,8 @@ def _track_record(df, feats, scoring):
     df["missed_gws"] = df["player_id"].map(missed).apply(lambda v: v if isinstance(v, list) else [])
     # players_raw.csv is a snapshot from early in that season: total its gameweeks instead.
     prev = DATA_RAW_PATH / TRAINING_SEASONS[-1]
+    if not (prev / "players_raw.csv").exists():  # the scheduled refresh starts without raw data
+        HistoricalDataCollector().download_season(TRAINING_SEASONS[-1], DATA_RAW_PATH)
     pts = pd.read_csv(prev / "merged_gw.csv", usecols=["element", "total_points"]).groupby("element")["total_points"].sum()
     ids = pd.read_csv(prev / "players_raw.csv", usecols=["id", "code"]).set_index("code")["id"]
     df["last_season_pts"] = df["code"].map(ids).map(pts)
@@ -939,6 +957,7 @@ def main():
     sub.add_parser("download", help="historical seasons + this season's per-fixture history")
     sub.add_parser("features", help="build the modelling dataset")
     sub.add_parser("train", help="train, validate and calibrate the models")
+    sub.add_parser("retrain", help="refresh the data and refit the live models (weekly, in CI)")
 
     players_p = sub.add_parser("players", help="list all players per position with stats")
     players_p.add_argument("--top", type=int, default=20, help="rows shown per position (0 = all)")
@@ -963,6 +982,7 @@ def main():
         "download": cmd_download,
         "features": cmd_features,
         "train": cmd_train,
+        "retrain": cmd_retrain,
         "players": cmd_players,
         "dashboard": cmd_dashboard,
         "export": cmd_export,
