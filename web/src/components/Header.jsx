@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { CHIP_NAMES } from "../rules.js";
 import { Beta, useOutside } from "./ui.jsx";
 
@@ -64,9 +64,16 @@ export default function Header({ page, recency, setRecency, team, teamLoading, s
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useOutside(ref, () => setOpen(false), open);
+  // Phones: pages and the projection blend live behind a menu button.
+  const [menu, setMenu] = useState(false);
+  useEffect(() => {
+    const close = () => setMenu(false);
+    window.addEventListener("hashchange", close);
+    return () => window.removeEventListener("hashchange", close);
+  }, []);
 
   return (
-    <header className="topbar">
+    <header className={`topbar ${menu ? "open" : ""}`}>
       <div className="topbar-inner">
         <a className="brand" href="#/home" aria-label="FPL AI home">
           <span className="brand-mark" aria-hidden>◆</span>
@@ -132,6 +139,8 @@ export default function Header({ page, recency, setRecency, team, teamLoading, s
               </div>
             )}
           </div>
+          <button type="button" className="menu-btn" aria-label={menu ? "Close menu" : "Menu"} aria-expanded={menu}
+            onClick={() => setMenu((m) => !m)}>{menu ? "✕" : "☰"}</button>
         </div>
       </div>
     </header>
