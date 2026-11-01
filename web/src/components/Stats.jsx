@@ -78,12 +78,20 @@ const COLUMNS = [
 // a box to zoom into (or pans, with the pan tool), double-click resets.
 const ZOOM_STEP = 1.5;     // the − / + buttons
 const DRAG_MIN = 5;        // px of movement before a press counts as a drag, not a click
-const LABEL_ALL = 30;      // name every dot once this few are in view
+const LABEL_PX = 11;       // name size on screen, whatever the chart's width
 const TAP_REACH = 22;      // screen px: a tap picks the nearest dot this close (dots are small on phones)
 
 function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
   const [hover, setHover] = useState(null);
   const [sel, setSel] = useState(null); // the tapped player, shown in the overview card
+  const [names, setNames] = useState(true);
+  const [scale, setScale] = useState(1); // chart units per screen pixel, so names keep one size
+  useEffect(() => {
+    const el = svgRef.current;
+    const ro = new ResizeObserver(() => setScale(W / (el.getBoundingClientRect().width || W)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const [view, setView] = useState(null);
   const [tool, setTool] = useState("box");
   const [drag, setDrag] = useState(null); // {sx, sy, ex, ey, start: view at press}
@@ -185,7 +193,23 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
     return x >= d.x0 && x <= d.x1 && y >= d.y0 && y <= d.y1;
   });
   const named = new Set(curves.flatMap((c) => c.hull.map((q) => q.p)));
-  const labelled = inView.length <= LABEL_ALL ? inView.filter((p) => !named.has(p)) : [];
+  // Names that fit without overlapping: curve players always, then the tapped
+  // player, your squad and the highest on the y axis. Zooming in spreads the
+  // dots, so more fit; a name that would run off the right edge goes on the left.
+  const font = LABEL_PX * scale, gapX = 6 * scale;
+  const boxes = [], labels = [];
+  const rank = (p) => (p === sel ? 2 : placedIds.has(p.player_id) ? 1 : 0);
+  const order = [...named, ...(names ? inView.filter((p) => !named.has(p) && !faded(p))
+    .sort((a, b) => rank(b) - rank(a) || ym.get(b, recency) - ym.get(a, recency)) : [])];
+  for (const p of order) {
+    const cx = px(xm.get(p, recency)), cy = py(ym.get(p, recency)), w = p.player_name.length * font * 0.56;
+    const left = cx + gapX + w > M.left + IW;
+    const b = { x0: left ? cx - gapX - w : cx + gapX, y0: cy - font * 0.6, y1: cy + font * 0.6 };
+    b.x1 = b.x0 + w;
+    if (!named.has(p) && boxes.some((o) => b.x0 < o.x1 && b.x1 > o.x0 && b.y0 < o.y1 && b.y1 > o.y0)) continue;
+    boxes.push(b);
+    labels.push({ p, x: left ? cx - gapX : cx + gapX, y: cy + font * 0.35, left, curve: named.has(p) });
+  }
 
   return (
     <div className="chart-wrap">
@@ -196,6 +220,7 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
           <button type="button" className="btn sm" onClick={() => zoomCentre(ZOOM_STEP)} aria-label="Zoom out">−</button>
           <button type="button" className="btn sm" onClick={() => zoomCentre(1 / ZOOM_STEP)} aria-label="Zoom in">+</button>
           <button type="button" className="btn sm ghost" onClick={() => setView(null)} disabled={!view}>Reset</button>
+          <button type="button" className={`chip ${names ? "on" : ""}`} aria-pressed={names} onClick={() => setNames((v) => !v)}>Names</button>
         </div>
         <small className="chart-help">{tool === "box" ? "Drag a box around players to zoom in" : "Drag to move around"} · pinch or
           {" "}Ctrl/⌘ + scroll to zoom · double-click to reset · {inView.length} in view</small>
@@ -238,11 +263,9 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
             onPointerMove={(e) => e.pointerType === "mouse" && setHover({ p, x: e.clientX, y: e.clientY })}
             onPointerLeave={() => setHover(null)} />
         ))}
-        {curves.flatMap((c) => c.hull.map((q) => (
-          <text key={q.p.player_id} x={px(q.x) + 7} y={py(q.y) - 7} className="vlabel">{q.p.player_name}</text>
-        )))}
-        {labelled.map((p) => (
-          <text key={p.player_id} x={px(xm.get(p, recency)) + 7} y={py(ym.get(p, recency)) + 4} className="vlabel small">{p.player_name}</text>
+        {labels.map(({ p, x, y, left, curve }) => (
+          <text key={p.player_id} x={x} y={y} textAnchor={left ? "end" : "start"} className={`vlabel ${curve ? "" : "small"}`}
+            style={{ fontSize: font, strokeWidth: 3 * scale }}>{p.player_name}</text>
         ))}
         </g>
         {boxing && (() => {

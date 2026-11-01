@@ -625,7 +625,7 @@ dl.kv dd { margin: 0; font-weight: 700; text-align: right; }
 .chart.tool-pan { cursor: grab; }
 .chart.panning { cursor: grabbing; }
 .chart .zoom-box { fill: rgba(4, 245, 255, 0.1); stroke: var(--cyan); stroke-width: 1.5; stroke-dasharray: 5 4; pointer-events: none; }
-.chart .vlabel.small { font-size: 10px; font-weight: 600; fill: var(--muted); }
+.chart .vlabel.small { font-weight: 600; fill: #e3d6ee; }
 .chart-tools { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .chart-zoom { display: flex; gap: 6px; }
 .chart-zoom .btn { min-width: 34px; }
@@ -633,7 +633,7 @@ dl.kv dd { margin: 0; font-weight: 700; text-align: right; }
 .vcurve .edge { fill: none; stroke: var(--pos); stroke-width: 2.5; stroke-linejoin: round; }
 .vcurve .ray { stroke: var(--pos); stroke-width: 1.5; stroke-dasharray: 4 4; opacity: 0.7; }
 .vcurve .band { fill: var(--pos); opacity: 0.13; }
-.chart .vlabel { fill: var(--text); font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; pointer-events: none; }
+.chart .vlabel { fill: var(--text); font-weight: 700; paint-order: stroke; stroke: var(--bg); stroke-linejoin: round; pointer-events: none; }
 .scatter-tip .tip-gap { color: var(--green); font-weight: 700; margin-top: 2px; }
 .dot-card {
   position: fixed; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 35; width: 380px;
