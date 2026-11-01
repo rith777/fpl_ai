@@ -35,16 +35,6 @@ export function sourceGains(inP, outP) {
     .sort((x, y) => y.diff - x.diff);
 }
 
-// One line per move on where the gain comes from under FPL's scoring.
-export function rulesReason(item) {
-  return item.moves.flatMap((m) => {
-    const top = sourceGains(m.in, m.out).slice(0, 2);
-    if (!top.length) return [];
-    const parts = top.map((s) => `${s.noun} (+${s.diff.toFixed(1)}/GW: ${s.why})`);
-    return [`By FPL's scoring, ${m.in.player_name} out-earns ${m.out.player_name} most on ${parts.join(" and ")}.`];
-  });
-}
-
 export const CHIP_NAMES = { bboost: "Bench Boost", "3xc": "Triple Captain", wildcard: "Wildcard", freehit: "Free Hit" };
 
 // Chips still to play: FPL gives one of each per half-season window; a chip

@@ -143,6 +143,7 @@ class FPLApiClient:
             rows.append(
                 {
                     "player_id": el["id"],
+                    "code": el["code"],  # the same player across seasons (ids change)
                     "player_name": el["web_name"],
                     "full_name": f"{el['first_name']} {el['second_name']}".strip(),
                     "team_id": el["team"],

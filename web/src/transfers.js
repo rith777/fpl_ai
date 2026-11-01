@@ -10,6 +10,7 @@
 // * "too close to call" is the model's measured error (model.json), and only
 //   labels results: decisions themselves follow expected points.
 import { adjPoints, MAX_PER_CLUB, POSITIONS, SQUAD_SIZE, XI_BOUNDS, xiFits } from "./lib.js";
+import { sourceGains } from "./rules.js";
 
 export const HIT_COST = 4; // FPL rule: points deducted per transfer beyond the free ones
 
@@ -369,6 +370,48 @@ export function transferPlan({
   return freeTransfers >= squad.length ? rebuilt(ctx, plan, bank) : plan;
 }
 
+// The best plan for each number of moves from 1 to `upTo`, free up to
+// `freeTransfers` and a hit each after, so the options sit side by side:
+// single moves one at a time, or opening with the best pair priced jointly,
+// whichever adds more net of hits (the cheaper on a tie). A plan stops short
+// when no further move adds points.
+export function planOptions({ squad, players, bank, priceOf, recency, freeTransfers, upTo }) {
+  const ctx = { players, priceOf, recency };
+  const chain = (items, sq, b) => {
+    while (items.reduce((t, it) => t + it.moves.length, 0) < upTo) {
+      const [m] = bestMoves({ ...ctx, squad: sq, bank: b });
+      if (!m || shown(m.gain) <= 0) break;
+      items.push(m);
+      sq = applyMoves(sq, m.moves);
+      b -= spend(m.moves);
+    }
+    return items;
+  };
+  const singles = chain([], squad, bank);
+  const pair = upTo >= 2 && bestPair({ ...ctx, squad, bank });
+  const paired = pair ? chain([pair], applyMoves(squad, pair.moves), bank - spend(pair.moves)) : [];
+  const withHits = (items) => {
+    let used = 0;
+    return items.map((it) => {
+      const hits = Math.max(0, Math.min(it.moves.length, used + it.moves.length - freeTransfers));
+      used += it.moves.length;
+      return { ...it, hits };
+    });
+  };
+  // The first items of a chain that make exactly n moves, if it gets that far.
+  const prefix = (items, n) => {
+    let k = 0;
+    for (let used = 0; k < items.length && used < n; k++) used += items[k].moves.length;
+    const cut = items.slice(0, k);
+    return cut.reduce((t, it) => t + it.moves.length, 0) === n ? withHits(cut) : null;
+  };
+  return Array.from({ length: upTo }, (_, i) => {
+    const [a, b] = [prefix(singles, i + 1), prefix(paired, i + 1)];
+    if (!a || !b) return a ?? b;
+    return sameGain(planGain(a), planGain(b)) ? (planCost(b) < planCost(a) ? b : a) : planGain(b) > planGain(a) ? b : a;
+  });
+}
+
 // A rebuild (every transfer free: a Wildcard or Free Hit) goes on where single
 // moves stop: while a pair priced jointly still adds points, make it and
 // carry on with single moves from there.
@@ -499,13 +542,14 @@ export function lineupCheck(squad, starters, bench, recency) {
 }
 
 // ---------------------------------------------------------------------------
-// Plain-English reasons, built from the same numbers. Attributes are compared
-// on the scale of how much players in that position typically differ (their
-// spread among players likely to play), so nothing hinges on a typed-in
-// "good form" cutoff: reasons quote whichever attributes separate the two
-// players most.
+// The case for and against a move, built from the same numbers. Attributes are
+// compared on the scale of how much players in that position typically differ
+// (their spread among players likely to play), so nothing hinges on a typed-in
+// "good form" cutoff: each side quotes whichever attributes separate the two
+// players most. Every point is a short label and the numbers behind it.
 const pct = (v) => `${Math.round((v ?? 0) * 100)}%`;
 const signed = (v) => { const x = Math.round((v ?? 0) * 100); return `${x > 0 ? "+" : x < 0 ? "−" : "±"}${Math.abs(x)}%`; };
+const fixed = (d) => (v) => (v ?? 0).toFixed(d);
 const attacker = (p) => p.position === "MID" || p.position === "FWD";
 const defender = (p) => p.position === "GK" || p.position === "DEF";
 const lower = (s) => s.charAt(0).toLowerCase() + s.slice(1);
@@ -515,26 +559,25 @@ const names = (ps) => joinAnd(ps.map((p) => p.player_name));
 // `show` is how a value is printed: two values that print the same aren't a reason.
 const ATTRS = [
   { key: "start_prob", fits: () => true, get: (p) => p.start_prob ?? 0, show: pct,
-    buy: (i, o) => `is likelier to play (${pct(i.start_prob)} vs ${pct(o.start_prob)})`,
-    sell: (o, m) => `${o.player_name} is less likely than most to play (${pct(o.start_prob)}, typical ${pct(m)})` },
-  { key: "pts_if_play", fits: () => true, get: (p) => p.pts_if_play ?? 0, show: (v) => v.toFixed(1),
-    buy: (i, o) => `scores more when he plays (${(i.pts_if_play ?? 0).toFixed(1)} vs ${(o.pts_if_play ?? 0).toFixed(1)} pts)`,
-    sell: (o, m) => `${o.player_name} scores less than most when he plays (${(o.pts_if_play ?? 0).toFixed(1)} pts, typical ${m.toFixed(1)})` },
-  { key: "form", fits: () => true, get: (p) => p.form ?? 0, show: (v) => v.toFixed(1),
-    buy: (i, o) => `is in better form (${(i.form ?? 0).toFixed(1)} vs ${(o.form ?? 0).toFixed(1)})`,
-    sell: (o, m) => `${o.player_name}'s form (${(o.form ?? 0).toFixed(1)}) is below a typical ${o.position}'s (${m.toFixed(1)})` },
+    up: "Likelier to play", down: "Less likely to play" },
+  { key: "pts_if_play", fits: () => true, get: (p) => p.pts_if_play ?? 0, show: fixed(1), unit: " pts",
+    up: "Scores more when he plays", down: "Scores less when he plays" },
+  // Expected points per appearance over his last few (from xG, not FPL's form,
+  // which counts a missed match as 0 and is mostly luck).
+  { key: "recent_xp", fits: () => true, get: (p) => p.recent_xp ?? 0, show: fixed(1), unit: " xP a game lately",
+    up: "Better recent games", down: "Weaker recent games" },
   { key: "fixture_effect", fits: () => true, get: (p) => p.fixture_effect ?? 0, show: signed,
-    buy: (i, o) => `has the kinder next ${horizon()} (fixtures ${signed(i.fixture_effect)} vs ${signed(o.fixture_effect)})`,
-    sell: (o) => `${o.player_name} faces a tougher run than most (fixtures ${signed(o.fixture_effect)})` },
-  { key: "xgi_per_90", fits: attacker, get: (p) => p.xgi_per_90 ?? 0, show: (v) => v.toFixed(2),
-    buy: (i, o) => `creates more (${(i.xgi_per_90 ?? 0).toFixed(2)} vs ${(o.xgi_per_90 ?? 0).toFixed(2)} xGI/90)`,
-    sell: (o, m) => `${o.player_name} creates less than most (${(o.xgi_per_90 ?? 0).toFixed(2)} xGI/90, typical ${m.toFixed(2)})` },
+    up: "Kinder fixtures", down: "Tougher fixtures" },
+  { key: "xgi_per_90", fits: attacker, get: (p) => p.xgi_per_90 ?? 0, show: fixed(2), unit: " xGI/90",
+    up: "Creates more", down: "Creates less" },
   { key: "cs_prob", fits: defender, get: (p) => p.cs_prob ?? 0, show: pct,
-    buy: (i, o) => `has better clean-sheet odds (${pct(i.cs_prob)} vs ${pct(o.cs_prob)})`,
-    sell: (o, m) => `${o.player_name}'s clean-sheet odds are below par (${pct(o.cs_prob)}, typical ${pct(m)})` },
-  { key: "defcon_xp", fits: (p) => p.position !== "GK", get: (p) => p.defcon_xp ?? 0, show: (v) => v.toFixed(2),
-    buy: (i, o) => `earns more DefCon points (${(i.defcon_xp ?? 0).toFixed(2)} vs ${(o.defcon_xp ?? 0).toFixed(2)})`,
-    sell: (o, m) => `${o.player_name} earns fewer DefCon points than most (${(o.defcon_xp ?? 0).toFixed(2)}, typical ${m.toFixed(2)})` },
+    up: "Better clean-sheet odds", down: "Worse clean-sheet odds" },
+  { key: "defcon_xp", fits: (p) => p.position === "DEF" || p.position === "MID", get: (p) => p.defcon_xp ?? 0, show: fixed(2),
+    up: "More DefCon points", down: "Fewer DefCon points" },
+  // Track record: last season's Premier League points (not a projection input).
+  { key: "last_season_pts", fits: () => true, get: (p) => p.last_season_pts ?? 0, show: (v) => `${Math.round(v)}`,
+    vs: (i, o) => `last season ${[i, o].map((p) => (p.last_season_pts == null ? "not in the PL" : `${p.last_season_pts} pts`)).join(" vs ")}`,
+    up: "Stronger track record", down: "Less proven" },
 ];
 
 // Median and spread of each attribute per position, among players more likely
@@ -555,68 +598,100 @@ export function positionStats(players) {
   return stats;
 }
 
-function whyBuy(i, o, stats) {
-  return ATTRS
-    .filter((a) => a.fits(i) && stats[i.position]?.[a.key]?.sd > 0)
-    .filter((a) => a.show(a.get(i)) !== a.show(a.get(o)))
+// Scoring sources (rules.js) that an attribute above already speaks for.
+const COVERED = { clean_sheet: "cs_prob", defcon: "defcon_xp" };
+const duties = (p) => [p.on_pens && "penalties", p.on_fks && "free kicks", p.on_corners && "corners"].filter(Boolean);
+const flag = (p) => `${p.status === "d" ? "doubt" : "out"}${p.news ? `: ${lower(p.news)}` : ""}`;
+const signedPts = (v) => `${Math.round(v * 10) < 0 ? "−" : "+"}${Math.abs(v).toFixed(1)}`;
+
+// What the extra money buys, for a move that spends more than the sale
+// raises: the best player the sale alone pays for, in place of the same player.
+function atSalePrice({ out: o, in: i, cost }, { squad, players, recency }) {
+  const score = scorer(recency), base = squadValue(squad, score);
+  const rest = squad.filter((p) => p !== o), own = new Set(squad.map((p) => p.player_id));
+  const gainOf = (c) => evaluate(squad, [o], [c], score, base).gain;
+  let best = null;
+  for (const c of players) {
+    if (c.position !== o.position || own.has(c.player_id) || c.price > i.price - cost + 1e-9 || !clubsFit(rest, [c])) continue;
+    const gain = gainOf(c);
+    if (!best || gain > best.gain) best = { p: c, gain };
+  }
+  return best && { ...best, mine: gainOf(i) };
+}
+
+// One move's case. Besides the projections: FPL's scoring (where the extra
+// points come from), the money (`ctx`: squad, players, recency and bank, to
+// price it against the best buy the sale alone pays for; `left`: the bank
+// after the whole suggestion), set pieces (FPL's
+// current lists), ownership (selling a widely owned player leaves you exposed if
+// he scores; buying one few own gains ground), likely price moves this week,
+// matches missed lately and injury flags. `fairShare` is the ownership an even
+// spread would give each player.
+function caseFor({ in: i, out: o, cost }, stats, fairShare, ctx) {
+  const pros = [], cons = [];
+  const scored = ATTRS
+    .filter((a) => a.fits(i) && stats[i.position]?.[a.key]?.sd > 0 && a.show(a.get(i)) !== a.show(a.get(o)))
     .map((a) => ({ a, z: (a.get(i) - a.get(o)) / stats[i.position][a.key].sd }))
-    .filter(({ z }) => z > 0)
-    .sort((x, y) => y.z - x.z)
-    .slice(0, 2)
-    .map(({ a }) => a.buy(i, o));
+    .sort((x, y) => Math.abs(y.z) - Math.abs(x.z));
+  const vs = (a) => a.vs?.(i, o) ?? `${a.show(a.get(i))} vs ${a.show(a.get(o))}${a.unit ?? ""}`;
+  const better = scored.filter(({ z }) => z > 0).slice(0, 3);
+  better.forEach(({ a }) => pros.push({ text: a.up, detail: vs(a) }));
+  scored.filter(({ z }) => z < 0).slice(0, 3).forEach(({ a }) => cons.push({ text: a.down, detail: vs(a) }));
+  const said = new Set(better.map(({ a }) => a.key));
+  sourceGains(i, o).filter((s) => !said.has(COVERED[s.key])).slice(0, 2)
+    .forEach((s) => pros.push({ text: `More from ${s.noun}`, detail: `+${s.diff.toFixed(1)}/GW`, title: s.why }));
+  if (Math.round(cost * 10) < 0) pros.push({ text: `£${(-cost).toFixed(1)}m cheaper` });
+  if (Math.round(cost * 10) > 0 && ctx) {
+    cons.push({ text: `£${cost.toFixed(1)}m more than the sale`, detail: `£${Math.max(0, ctx.left).toFixed(1)}m left in the bank after` });
+    const alt = atSalePrice({ in: i, out: o, cost }, ctx);
+    const line = alt && `${alt.p.player_name} at £${alt.p.price.toFixed(1)}m: ${signedPts(alt.gain)} vs ${signedPts(alt.mine)} pts/GW`;
+    if (alt && alt.mine - alt.gain <= sigmaGain()) cons.push({ text: "A cheaper option is about as good", detail: line });
+    else if (alt) pros.push({ text: "Clearly worth the extra money", detail: line });
+  }
+  if (o.status && o.status !== "a") pros.push({ text: `Sells a flagged player`, detail: flag(o) });
+  if (i.status && i.status !== "a") cons.push({ text: `${i.player_name} is flagged`, detail: flag(i) });
+  // Matches missed lately (injury, suspension or dropped: FPL doesn't say which).
+  const missed = (p) => (p.missed_gws?.length ? p.missed_gws.map((g) => `GW${g}`).join(", ") : null);
+  if (missed(i)) cons.push({ text: `${i.player_name} missed ${missed(i)}` });
+  if (missed(o) && o.status === "a") cons.push({ text: `${o.player_name} missed ${missed(o)}`, detail: "fit now, so his totals undersell him" });
+  const gained = duties(i).filter((d) => !duties(o).includes(d)), lost = duties(o).filter((d) => !duties(i).includes(d));
+  if (gained.length) pros.push({ text: "Takes set pieces", detail: joinAnd(gained) });
+  if (lost.length) cons.push({ text: "Loses set pieces", detail: joinAnd(lost) });
+  if ((i.selected_by_percent ?? 100) < fairShare) pros.push({ text: "Differential", detail: `${i.selected_by_percent.toFixed(1)}% owned` });
+  if (o.selected_by_percent > 50) cons.push({ text: "Sells a template player", detail: `${o.selected_by_percent.toFixed(1)}% own him` });
+  // Chance of a price move this gameweek on the transfers so far (a price that already moved is past news).
+  const likely = (p, key) => (!p.price_change && (p[key] ?? 0) > 0.5 ? pct(p[key]) : null);
+  if (likely(i, "rise_chance")) pros.push({ text: "Beats a price rise", detail: `${likely(i, "rise_chance")} likely` });
+  if (likely(o, "fall_chance")) pros.push({ text: "Sells before a price drop", detail: `${likely(o, "fall_chance")} likely` });
+  return { pros, cons };
 }
 
-function whySell(o, stats) {
-  if (o.status && o.status !== "a")
-    return `${o.player_name} is ${o.status === "d" ? "a doubt" : "unavailable"}${o.news ? ` (${lower(o.news)})` : ""}`;
-  const worst = ATTRS
-    .filter((a) => a.fits(o) && stats[o.position]?.[a.key]?.sd > 0 && a.show(a.get(o)) !== a.show(stats[o.position][a.key].median))
-    .map((a) => ({ a, s: stats[o.position][a.key], z: (a.get(o) - stats[o.position][a.key].median) / stats[o.position][a.key].sd }))
-    .sort((x, y) => x.z - y.z)[0];
-  if (!worst || worst.z >= 0) return `${o.player_name} projects lower over the next ${horizon()} gameweeks`;
-  const text = worst.a.sell(o, worst.s.median);
-  // Points down but chances up: say so, it's the case for patience.
-  const xgi = stats[o.position]?.xgi_per_90;
-  const unlucky = worst.a.key === "form" && attacker(o) && xgi?.sd > 0 && (o.xgi_per_90 ?? 0) > xgi.median;
-  return unlucky ? `${text}, although his xGI (${(o.xgi_per_90 ?? 0).toFixed(2)}/90) is above average, so he may have been unlucky` : text;
-}
-
-export function transferReason(item, stats) {
-  const lines = item.moves.map((m) => {
-    const buy = whyBuy(m.in, m.out, stats);
-    // Cheaper and scores less when he plays: the case is the money.
-    if (m.cost < 0 && (m.in.pts_if_play ?? 0) < (m.out.pts_if_play ?? 0))
-      return `${m.in.player_name} ${buy.length ? joinAnd(buy) : "projects about the same"}, and costs £${(-m.cost).toFixed(1)}m less than ${m.out.player_name}.`;
-    return `${whySell(m.out, stats)}; ${m.in.player_name} ${buy.length ? joinAnd(buy) : "projects better"}.`;
+// The case for a plan: each move's, worked out from the squad as the moves
+// before it leave it (`ctx`: squad, players, recency, bank; the bank quoted is
+// after the whole plan, since one sale can fund another buy), plus what goes
+// with the plan as a whole (a hit, a gain inside the margin of error), and who
+// really drops out of the best XI, since gains are measured on it (and why two
+// moves' gains don't simply add up: both can target the same weakest starter).
+export function planCase(items, stats, fairShare, ctx) {
+  const left = ctx && ctx.bank - planCost(items);
+  let squad = ctx?.squad;
+  const moves = items.flatMap((it) => {
+    const cases = it.moves.map((m) => caseFor(m, stats, fairShare, ctx && { ...ctx, squad, left }));
+    if (squad) squad = applyMoves(squad, it.moves);
+    return cases;
   });
-  // Gains are measured on the best XI, so say who actually drops out of it. This
-  // is also why two moves' gains don't simply add up: both can target the same
-  // weakest starter, who can only be replaced once.
-  const leaving = item.xiBefore ? [...item.xiBefore].filter((p) => !item.xiAfter.has(p)) : [];
-  const outs = item.moves.map((m) => m.out);
-  if (leaving.length && !leaving.every((p) => outs.includes(p))) {
-    const ins = item.moves.map((m) => m.in).filter((p) => item.xiAfter.has(p));
-    const subs = outs.filter((p) => !item.xiBefore.has(p));
-    lines.push(`In your best XI, ${names(ins)} would start in place of ${names(leaving)}` +
-      (subs.length ? ` (${names(subs)} ${subs.length > 1 ? "are" : "is"} already on your bench there).` : "."));
-  }
-  const band = sigmaGain(), h = horizon();
-  if (item.hits) {
-    const payback = item.gain * h - item.hits * HIT_COST;
-    lines.push(`Even after the −${item.hits * HIT_COST} it's about +${payback.toFixed(1)} pts over ${h} gameweeks` +
-      (payback < band * h ? `, but that's inside the model's margin of error (±${(band * h).toFixed(1)}), so it's a coin flip.` : "."));
-  } else if (item.gain < band) {
-    lines.push(`The gain is inside the model's margin of error (±${band.toFixed(1)} pts/GW): a fair move, but rolling the transfer is just as defensible.`);
-  }
-  if (item.linked) {
-    const down = item.moves.find((m) => m.cost < 0) ?? item.moves[0];
-    const up = item.moves.find((m) => m !== down);
-    lines.push(`Selling ${down.out.player_name} for ${down.in.player_name} frees £${(-down.cost).toFixed(1)}m, which is what makes ${up.in.player_name} (£${up.in.price.toFixed(1)}m) affordable.`);
-  } else {
-    const saved = -spend(item.moves);
-    if (Math.round(saved * 10) > 0) lines.push(`It also frees £${saved.toFixed(1)}m for a later upgrade.`);
-  }
-  return lines;
+  const band = sigmaGain(), h = horizon(), gain = planGain(items);
+  const hits = items.reduce((t, it) => t + it.hits, 0);
+  const cons = hits
+    ? [{ text: `−${hits * HIT_COST} hit`, detail: `${signedPts(gain * h)} pts net over ${h} GWs${gain < 0 ? ": a loss on projections" : gain < band ? ", a coin flip" : ""}` }]
+    : gain < band ? [{ text: "Inside the margin of error", detail: `±${band.toFixed(1)} pts/GW: rolling is as good` }] : [];
+  const notes = items.map((it) => {
+    const leaving = it.xiBefore ? [...it.xiBefore].filter((p) => !it.xiAfter.has(p)) : [];
+    const starting = it.moves.map((m) => m.in).filter((p) => it.xiAfter?.has(p));
+    return leaving.length && !leaving.every((p) => it.moves.some((m) => m.out === p))
+      ? `In your best XI, ${names(starting)} ${starting.length > 1 ? "start" : "starts"} over ${names(leaving)}.` : null;
+  }).filter(Boolean);
+  return { moves, cons, notes };
 }
 
 // Good / Average / Bad for a set of moves projected to add `gain` (pts/GW,
@@ -631,35 +706,4 @@ export function moveVerdict(gain, best) {
   if (best - gain > band) return { cls: "bad", label: "Bad", why: `the best plan is better by more than the margin of error (+${(best - gain).toFixed(1)}/GW)` };
   if (shown(gain) >= 0) return { cls: "good", label: "Good", why: shown(gain) >= shown(best) ? "the best plan available" : "as good as the best plan, within the model's margin of error" };
   return { cls: "ok", label: "Average", why: "slightly negative on projections, but inside the margin of error" };
-}
-
-// What else a move changes that the projections only see indirectly: set
-// pieces (FPL's current lists), the outgoing player's ownership (selling a
-// widely owned player leaves you exposed if he scores), the crowd's moves this
-// week, and injury flags. Skips whatever a player record doesn't carry.
-const duties = (p) => [p.on_pens && "penalties", p.on_fks && "direct free kicks", p.on_corners && "corners"].filter(Boolean);
-export function contextReason(item) {
-  return item.moves.flatMap((m) => {
-    const lines = [];
-    const gained = duties(m.in).filter((d) => !duties(m.out).includes(d));
-    const lost = duties(m.out).filter((d) => !duties(m.in).includes(d));
-    if (gained.length) lines.push(`${m.in.player_name} is on ${joinAnd(gained)} for his club (FPL's list).`);
-    if (lost.length) lines.push(`You lose ${m.out.player_name}'s ${joinAnd(lost)}.`);
-    // Owned by most managers: if he scores after you sell, most of them gain on you.
-    const owned = m.out.selected_by_percent;
-    if (owned > 50) lines.push(`${m.out.player_name} is owned by ${owned.toFixed(1)}% of managers: if he scores after you sell, most of them gain on you.`);
-    const crowd = (p) => p.net_transfers ?? 0;
-    const count = (n) => `${n < 0 ? "−" : "+"}${Math.abs(n).toLocaleString()}`;
-    if (crowd(m.in) > 0 && crowd(m.out) < 0)
-      lines.push(`The crowd agrees: managers are moving to ${m.in.player_name} (${count(crowd(m.in))} net this week) and off ${m.out.player_name} (${count(crowd(m.out))}).`);
-    else if (crowd(m.in) < 0 && crowd(m.out) > 0)
-      lines.push(`Against the crowd: managers are moving off ${m.in.player_name} (${count(crowd(m.in))} net this week) and onto ${m.out.player_name}.`);
-    // Price moves (chance of one this gameweek on the transfers so far, from past
-    // seasons; a price that already moved this week is past news).
-    const likely = (p, key) => !p.price_change && (p[key] ?? 0) > 0.5 ? Math.round(p[key] * 100) : null;
-    if (likely(m.in, "rise_chance")) lines.push(`${m.in.player_name}'s price is likely to rise before the deadline (${likely(m.in, "rise_chance")}%): buying early saves £0.1m.`);
-    if (likely(m.out, "fall_chance")) lines.push(`${m.out.player_name}'s price is likely to fall before the deadline (${likely(m.out, "fall_chance")}%): selling early keeps £0.1m.`);
-    if (m.in.status && m.in.status !== "a") lines.push(`Flag: ${m.in.player_name} is ${m.in.status === "d" ? "a doubt" : "unavailable"}${m.in.news ? ` (${lower(m.in.news)})` : ""}.`);
-    return lines;
-  });
 }

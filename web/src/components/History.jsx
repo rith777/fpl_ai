@@ -3,9 +3,10 @@ import { fetchSeason, sellingPrice } from "../fpl.js";
 import { identity, poolAt } from "../strategy.js";
 import {
   HIT_COST, horizon, lineupCheck, model, moveVerdict, planGain, positionStats, rollCheck, sigmaGain, squadGain,
-  transferPlan, transferReason,
+  transferPlan,
 } from "../transfers.js";
-import { Explainer, Shirt } from "./ui.jsx";
+import { More, Shirt } from "./ui.jsx";
+import { PlanCase } from "./TransfersPanel.jsx";
 
 const CHIP_NAMES = { bboost: "Bench Boost", "3xc": "Triple Captain", wildcard: "Wildcard", freehit: "Free Hit" };
 const shown = (x) => Math.round(x * 10);
@@ -129,12 +130,14 @@ function Why({ w, band }) {
         {!rebuilt && (
           <section>
             <h4>What the model would have done{w.best.plan.length ? ` (${signed(w.best.gain)}/GW, ${w.best.freeTransfers} free transfer${w.best.freeTransfers > 1 ? "s" : ""})` : ""}</h4>
-            {w.best.plan.length ? w.best.plan.map((it, i) => (
-              <div key={i} className="hx-alt">
-                <div className="hx-moves"><Moves moves={it.moves} />{it.hits > 0 && <small className="hx-hit">−{it.hits * HIT_COST} hit</small>}</div>
-                <ul>{transferReason(it, w.stats).map((line, j) => <li key={j}>{line}</li>)}</ul>
+            {w.best.plan.length ? (
+              <div className="hx-alt">
+                {w.best.plan.map((it, i) => (
+                  <div key={i} className="hx-moves"><Moves moves={it.moves} />{it.hits > 0 && <small className="hx-hit">−{it.hits * HIT_COST} hit</small>}</div>
+                ))}
+                <PlanCase items={w.best.plan} stats={w.stats} />
               </div>
-            )) : <p>No move improved the team, so roll the transfer.</p>}
+            ) : <p>No move improved the team, so roll the transfer.</p>}
             {w.roll && !w.roll.atCap && w.roll.minGain > 0 && (
               <p>Bar for using a transfer: +{w.roll.minGain.toFixed(2)} pts/GW (from the strategy backtest). The best move
                 {w.roll.use ? " cleared it." : " didn't, so the model would have rolled."}</p>
@@ -148,9 +151,6 @@ function Why({ w, band }) {
               {shown(w.captain.lost) > 0 ? ` ${w.captain.captain.player_name} at ${w.captain.captain.xp_next.toFixed(1)} left ${w.captain.lost.toFixed(1)} expected.` : ""}</p>
           </section>
         )}
-        <p className="hint">Margin of error on a transfer: ±{band.toFixed(1)} pts/GW (two players' projections, each off by
-          about {(model().sigma_mean ?? 0).toFixed(1)} on average, measured out of sample). Gaps inside it are calls
-          the model can't separate.</p>
       </div>
     </details>
   );
@@ -278,15 +278,7 @@ function ReportCard() {
           </tbody>
         </table>
       </div>
-      <Explainer summary="How the model is graded">
-        Before each deadline the model projects every player from the matches played by then (fitted on past seasons
-        only). Once the gameweek is over, the players it gave a 50%+ chance of playing are ranked by projection and by
-        what they really scored; the number is how closely the two orders agree (rank correlation: 1 is a perfect
-        order, 0 no better than chance). One gameweek is noisy, since a single goal reshuffles the order, so the season
-        average and how often the model beats each baseline say more. The baselines get the same players: points per
-        gameweek so far this season, and FPL's own expected points from the last snapshot this site saved before the
-        deadline. Projected vs scored checks the model isn't too high or too low overall.
-      </Explainer>
+      <More to="report-card">How the model is graded</More>
     </section>
   );
 }
@@ -362,21 +354,8 @@ export default function History({ team, players }) {
               <small>{signed(-sum((w) => w.lineup?.gain))} expected pts vs the best XI</small></div>
           </>}
         </div>
-        {estimated && <p className="hint">FPL doesn't share week-by-week squads with this hosted site, so each week's
-          squad is worked back from the one saved in this browser through your transfers. Transfers are graded; captains
-          and lineups aren't public, so they're graded for the weeks you set them in this app before the deadline
-          ({setHere} so far; captains where you picked one), not what you set on FPL.</p>}
-        <Explainer summary="How weeks are graded">
-          Each week is graded on what the model projected before its deadline: a model fitted on past seasons, fed only
-          this season's matches played by then. No hindsight: real points and rank are shown for context but never used
-          to grade. Transfer gains are per gameweek over the next {H}; captain and XI calls are for that week.
-          <b> Good</b> means as good as the best option, within the model's margin of error (±{band.toFixed(1)} pts/GW on a
-          transfer); <b>Bad</b> means the model was clearly against it, by more than that margin; <b>Average</b> is in
-          between. A rolled transfer is judged against the bar the strategy backtest set for using one. FPL doesn't archive
-          injury news, so a move made because of a flag may grade lower than it deserves. Open <b>Why</b> on any week for
-          the numbers, and the model's case for its own plan. How the model's strategy would actually have scored from
-          your squad is on the Strategy page.
-        </Explainer>
+        {estimated && <p className="hint">Squads worked back from the one saved in this browser; captains and lineups graded for the {setHere} weeks you set them here.</p>}
+        <More to="grading">How weeks are graded</More>
       </section>
       {status && <div className="loading"><span className="spinner" aria-hidden />{status}</div>}
       {[...weeks].reverse().map((w, i) => <Week key={w.gw} w={w} i={i} band={band} />)}

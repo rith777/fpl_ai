@@ -118,14 +118,20 @@ python main.py all         # download, features, train, export, history, backtes
   against expected points (from the best points-per-£m player up), with the
   model's margin of error as a band. It lists the players on or near it,
   closest first, with minutes, set pieces and ownership.
+- Transfers shows the model's plan next to the best plan for each number of
+  moves, up to your free transfers plus one (a −4 hit).
 - My Team has two modes, Pick team and Transfers. Transfers judges any moves you plan (swap players in the app):
   what they add per gameweek from now, Good / Average / Bad against the best
   plan for the same free transfers (by the model's margin of error), and each
-  move's reasons: the projections, FPL's scoring rules, set-piece duties
-  (FPL's current lists), selling a player most managers own, the crowd's
-  transfers this week and injury flags. Its Chips card says when to play each
+  move's case as two columns, For and Against: the projections, recent games
+  (expected points per appearance, not FPL's form), last season's points,
+  FPL's scoring rules, the money (against the best player the sale alone pays
+  for), set-piece duties (FPL's current lists), ownership, likely price moves
+  this week, matches missed lately and injury flags. Its Chips card says when to play each
   chip, lists blank and double gameweeks for your squad, and checks what a
   Wildcard would add now.
+- Pages keep explanations short and link to the About page (`#/about/<section>`),
+  which holds who built it, how it works and how to read each page.
 - History ends with the model's report card: for each finished gameweek, how
   well the deadline projections ranked the likely starters by what they scored
   (rank correlation), next to points per gameweek so far and FPL's own expected

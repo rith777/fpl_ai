@@ -11,7 +11,7 @@ export const PAGES = [
   { id: "fixtures", label: "Fixtures" },
   { id: "history", label: "History", beta: true },
   { id: "strategy", label: "Strategy", beta: true },
-  { id: "about", label: "How it works" },
+  { id: "about", label: "About" },
 ];
 
 export const recencyLabel = (r) => (r === 0 ? "Season" : r === 1 ? "Form" : `${Math.round(r * 100)}% form`);

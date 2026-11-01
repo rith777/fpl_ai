@@ -36,14 +36,15 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from data.collectors import FPLApiClient, HistoricalDataCollector  # noqa: E402
 from data.processors import FPLDataProcessor, club_names, load_odds, match_odds  # noqa: E402
 from features.engineering import (  # noqa: E402
-    CONCEDED_PER_POINT, LONG_PLAY_MINUTES, ODDS_FEATURES, STRENGTH, FeatureEngineer, add_context, per_k, team_strength,
+    CONCEDED_PER_POINT, LONG_PLAY_MINUTES, ODDS_FEATURES, STRENGTH, FeatureEngineer, add_context, expected_match_points, per_k,
+    team_strength,
 )
 from models.optimizer import pick_squad  # noqa: E402
 from models.predictors import FPLPredictor  # noqa: E402
 from models.trainer import ModelTrainer, _fit_pair  # noqa: E402
 from utils.config import (  # noqa: E402
     CURRENT_SEASON, DATA_PROCESSED_PATH, DATA_RAW_PATH, BACKTEST_STARTS, HORIZON, HORIZON_CHOICES, MIN_GAIN_CHOICES, MODELS_PATH,
-    OUTPUTS_PATH, SQUAD_BUDGET, SQUAD_SIZE, TRAINING_SEASONS,
+    OUTPUTS_PATH, ROLLING_WINDOW, SQUAD_BUDGET, SQUAD_SIZE, TRAINING_SEASONS,
 )
 
 FEATURES_FILE = DATA_PROCESSED_PATH / "dataset_with_features.csv"
@@ -266,6 +267,7 @@ def _score_players(players: pd.DataFrame, api, predictor, refresh: bool = True) 
                                       if pid in by_gw.index else [0.0] * len(gws))
     scoring = api.scoring()
     df = _display_stats(df, latest, strength, scoring, rows, first_gw)
+    df = _track_record(df, feats, scoring)
     df = _rules_breakdown(df, rows, feats, strength, scoring, first_gw, len(gws))
     df["projected_points"] = df["xp_next"].round(2)
     df["value"] = (df["xp_h"] / df["price"].clip(lower=0.1)).round(3)
@@ -303,6 +305,26 @@ def _display_stats(df, latest, strength, scoring, rows, first_gw):
     thr = pos.map(DEFCON_THRESHOLD)
     p_hit = poisson.sf(thr.fillna(10 ** 6).to_numpy() - 1, df["defcon_per_90"].fillna(0).to_numpy())
     df["defcon_xp"] = np.where(thr.isna(), 0.0, pos.map(scoring["defensive_contribution"]).fillna(0) * p_hit).round(2)
+    return df
+
+
+def _track_record(df, feats, scoring):
+    """More context for a move's case (not inputs to the projection): expected
+    points per appearance over his last ROLLING_WINDOW appearances (from xG, so
+    less luck than FPL's form, which also counts a missed match as 0), the
+    gameweeks of his club's last ROLLING_WINDOW matches he missed, and last
+    season's Premier League points (none: he wasn't in the league)."""
+    f = feats.assign(xpoints=expected_match_points(feats, scoring))
+    played = f[f["minutes"] > 0].groupby("player_id").tail(ROLLING_WINDOW)
+    df["recent_xp"] = df["player_id"].map(played.groupby("player_id")["xpoints"].mean()).round(2)
+    last = f.groupby("player_id").tail(ROLLING_WINDOW)
+    missed = last[last["minutes"] == 0].groupby("player_id")["gameweek"].agg(lambda s: sorted({int(g) for g in s}))
+    df["missed_gws"] = df["player_id"].map(missed).apply(lambda v: v if isinstance(v, list) else [])
+    # players_raw.csv is a snapshot from early in that season: total its gameweeks instead.
+    prev = DATA_RAW_PATH / TRAINING_SEASONS[-1]
+    pts = pd.read_csv(prev / "merged_gw.csv", usecols=["element", "total_points"]).groupby("element")["total_points"].sum()
+    ids = pd.read_csv(prev / "players_raw.csv", usecols=["id", "code"]).set_index("code")["id"]
+    df["last_season_pts"] = df["code"].map(ids).map(pts)
     return df
 
 
@@ -541,7 +563,7 @@ EXPORT_COLUMNS = [
     "points_per_game", "selected_by_percent", "xgi_per_90",
     "xg_per_90", "xa_per_90", "on_pens", "on_fks", "on_corners", "status", "news", "cost_change_start",
     "goals_scored", "assists", "clean_sheets", "bonus", "net_transfers", "price_change", "rise_chance", "fall_chance",
-    "xp_gw", "rules_next", "rules_h",
+    "xp_gw", "rules_next", "rules_h", "recent_xp", "missed_gws", "last_season_pts",
 ]
 
 

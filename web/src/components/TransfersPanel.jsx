@@ -1,12 +1,12 @@
-import React, { useContext, useDeferredValue, useMemo, useState } from "react";
+import React, { useContext, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { POS_COLOR, POS_NAME, POSITIONS, fairShareOwnership } from "../lib.js";
 import {
-  HIT_COST, chipValues, contextReason, horizon, model, moveVerdict, planGain as gainOf, positionStats, rollCheck,
-  sigmaGain, squadGain, transferPlan, transferReason, upgradeTargets,
+  HIT_COST, chipValues, horizon, model, moveVerdict, planCase, planGain as gainOf, planOptions, positionStats, rollCheck,
+  sigmaGain, squadGain, transferPlan, upgradeTargets,
 } from "../transfers.js";
-import { CHIP_NAMES, chipsLeft, rulesReason } from "../rules.js";
+import { CHIP_NAMES, chipsLeft } from "../rules.js";
 import { TIMED_CHIPS, chooseChip } from "../strategy.js";
-import { Beta, NextFixtures, Segmented, Shirt, TeamsContext } from "./ui.jsx";
+import { Beta, More, NextFixtures, Segmented, Shirt, TeamsContext } from "./ui.jsx";
 import PlayerList from "./PlayerList.jsx";
 import { TeamLoader } from "./Header.jsx";
 
@@ -17,44 +17,77 @@ const Side = ({ p, price, kind }) => (
   </div>
 );
 
-// One suggestion: a single move or a linked double move, with the reasoning.
-function Suggestion({ item, i, priceOf, tag, onApply, stats, fairShare }) {
-  const reasons = useMemo(() => [...transferReason(item, stats), ...rulesReason(item), ...contextReason(item)], [item, stats]);
-  const diffs = item.moves.filter((m) => (m.in.selected_by_percent ?? 100) < fairShare);
+// The case for a move side by side: what's for it, what's against it.
+export function MoveCase({ pros = [], cons = [] }) {
+  if (!pros.length && !cons.length) return null;
+  const col = (list, cls, head) => (
+    <div className={`mc-col ${cls}`}>
+      <h5>{head}</h5>
+      {list.length ? (
+        <ul>{list.map((r, k) => (
+          <li key={k} title={r.title}>{r.text}{r.detail && <small>{r.detail}</small>}</li>
+        ))}</ul>
+      ) : <p className="mc-none">Nothing notable</p>}
+    </div>
+  );
+  return <div className="mv-case">{col(pros, "pro", "For")}{col(cons, "con", "Against")}</div>;
+}
+
+const Line = ({ m, priceOf }) => (
+  <div className="mv-line">
+    <Side p={m.out} price={priceOf(m.out)} kind="out" />
+    <span className="mv-arrow" aria-hidden>→</span>
+    <Side p={m.in} price={m.in.price} kind="in" />
+  </div>
+);
+
+// A plan's case: one For / Against for a single move; with more, one per move
+// and what goes with the plan as a whole (a hit, the margin of error).
+export function PlanCase({ items, stats, fairShare, ctx }) {
+  const c = useMemo(() => planCase(items, stats, fairShare, ctx), [items, stats, fairShare, ctx]);
+  const moves = items.flatMap((it) => it.moves);
   return (
-    <div className={`move ${item.moves.length > 1 ? "combo" : ""}`}
-      style={{ "--pos": POS_COLOR[item.moves[0].in.position], "--i": i }}>
+    <>
+      {moves.length === 1 ? <MoveCase pros={c.moves[0].pros} cons={[...c.moves[0].cons, ...c.cons]} /> : <>
+        {moves.map((m, k) => (
+          <div key={m.out.player_id} className="mv-part">
+            <h4>{m.out.player_name} → {m.in.player_name}</h4>
+            <MoveCase {...c.moves[k]} />
+          </div>
+        ))}
+        {c.cons.length > 0 && <ul className="mv-warn">{c.cons.map((r, k) => <li key={k}>{r.text}{r.detail && <small>{r.detail}</small>}</li>)}</ul>}
+      </>}
+      {c.notes.map((n) => <p key={n} className="mv-note">{n}</p>)}
+    </>
+  );
+}
+
+const sizeName = (n) => (n <= 4 ? `${["Double", "Triple", "Quadruple"][n - 2]} move` : `${n} moves`);
+
+// A plan as one card: every move in it, the gain net of hits, and its case.
+function PlanCard({ items, priceOf, stats, fairShare, ctx }) {
+  const moves = items.flatMap((it) => it.moves);
+  const hits = items.reduce((t, it) => t + it.hits, 0);
+  return (
+    <div className={`move ${moves.length > 1 ? "combo" : ""}`} style={{ "--pos": POS_COLOR[moves[0].in.position] }}>
       <div className="mv-top">
         <div className="mv-lines">
-          {item.moves.length > 1 && (
-            <span className="mv-combo">{item.linked ? "Double move · one sale funds the other" : "Double move"}</span>
+          {moves.length > 1 && (
+            <span className="mv-combo">{sizeName(moves.length)}{items.some((it) => it.linked) ? " · one sale funds another" : ""}</span>
           )}
-          {item.moves.map((m) => (
-            <div className="mv-line" key={m.out.player_id}>
-              <Side p={m.out} price={priceOf(m.out)} kind="out" />
-              <span className="mv-arrow" aria-hidden>→</span>
-              <Side p={m.in} price={m.in.price} kind="in" />
-            </div>
-          ))}
+          {moves.map((m) => <Line key={m.out.player_id} m={m} priceOf={priceOf} />)}
         </div>
-        <div className="mv-gain">
-          <b>+{item.gain.toFixed(1)}</b><small>pts/GW</small>
-          {tag && <em className={tag === "FREE" ? "free" : "hit"}>{tag}</em>}
+        <div className="mv-gain" title={`Expected points per gameweek over the next ${horizon()}, after hits`}>
+          <b>{signed(gainOf(items))}</b><small>pts/GW</small>
+          <em className={hits ? "hit" : "free"}>{tagFor(hits)}</em>
         </div>
       </div>
-      <ul className="mv-why">{reasons.map((r, k) => <li key={k}>{r}</li>)}</ul>
+      <PlanCase items={items} stats={stats} fairShare={fairShare} ctx={ctx} />
       <div className="mv-fx">
-        {item.moves.map((m) => (
+        {moves.map((m) => (
           <span key={m.in.player_id}><b>{m.in.player_name}</b> <NextFixtures teamId={m.in.team_id} n={4} /></span>
         ))}
       </div>
-      {diffs.map((m) => (
-        <div className="mv-diff" key={m.in.player_id}>
-          ◆ Differential: only {m.in.selected_by_percent.toFixed(1)}% own {m.in.player_name} (an even share would be
-          {" "}{fairShare.toFixed(1)}%), so his points gain you ground on most managers.
-        </div>
-      ))}
-      {onApply && <button className="btn sm mv-apply" onClick={() => onApply(item.moves)}>Apply</button>}
     </div>
   );
 }
@@ -66,7 +99,7 @@ const signed = (x) => `${Math.round(x * 10) >= 0 ? "+" : "−"}${Math.abs(x).toF
 // this deadline on like any suggestion: what they add per gameweek over the
 // horizon after hits, against the best plan for the same free transfers, each
 // move on its own with its reasons.
-function YourMoves({ team, squad, players, priceOf, recency, freeTransfers, stats }) {
+function YourMoves({ team, squad, players, priceOf, recency, freeTransfers, stats, fairShare }) {
   const result = useMemo(() => {
     const byId = Object.fromEntries(players.map((p) => [p.player_id, p]));
     const original = team.picks.map((p) => byId[p.id]).filter(Boolean);
@@ -85,43 +118,29 @@ function YourMoves({ team, squad, players, priceOf, recency, freeTransfers, stat
     return {
       moves: moves.map((m) => ({ ...m, gain: squadGain(original, swapOne(m), recency) })),
       hits, gain, best, plan, verdict: moveVerdict(gain, best),
+      ctx: { squad: original, players, recency, bank: team.bank },
     };
   }, [team, squad, players, priceOf, recency, freeTransfers]);
   if (!result) return null;
-  const { moves, hits, gain, best, plan, verdict } = result;
+  const { moves, hits, gain, best, plan, verdict, ctx } = result;
   const theirs = plan.flatMap((it) => it.moves);
   const same = theirs.length === moves.length && theirs.every((m) => moves.some((x) => x.out.player_id === m.out.player_id && x.in.player_id === m.in.player_id));
   return (
     <section className="card your-moves">
       <div className="card-head">
         <h2>Your planned moves</h2>
-        <span className={`hx-verdict ${verdict.cls}`}>{verdict.label}</span>
+        <span className={`hx-verdict ${verdict.cls}`} title={verdict.why}>{verdict.label}</span>
       </div>
       <p className="ym-sum">
-        <b>{signed(gain)} pts/GW</b> over the next {horizon()} GWs{hits ? ` after the −${hits * HIT_COST} hit` : ""}; the best
-        plan with your {freeTransfers} free transfer{freeTransfers === 1 ? "" : "s"} adds {signed(best)}. {verdict.why.charAt(0).toUpperCase() + verdict.why.slice(1)}.
+        <b>{signed(gain)} pts/GW</b>{hits ? ` after the −${hits * HIT_COST} hit` : ""} · best plan {signed(best)}
       </p>
       {moves.map((m) => (
-        <div className="move" key={m.out.player_id} style={{ "--pos": POS_COLOR[m.in.position] }}>
-          <div className="mv-top">
-            <div className="mv-lines"><div className="mv-line">
-              <Side p={m.out} price={priceOf(m.out)} kind="out" />
-              <span className="mv-arrow" aria-hidden>→</span>
-              <Side p={m.in} price={m.in.price} kind="in" />
-            </div></div>
-            <div className="mv-gain"><b>{signed(m.gain)}</b><small>pts/GW</small></div>
-          </div>
-          <ul className="mv-why">
-            {[...transferReason({ moves: [m], gain: m.gain }, stats), ...rulesReason({ moves: [m] }), ...contextReason({ moves: [m] })]
-              .map((r, k) => <li key={k}>{r}</li>)}
-          </ul>
-        </div>
+        <PlanCard key={m.out.player_id} items={[{ moves: [m], gain: m.gain, hits: 0 }]} priceOf={priceOf}
+          stats={stats} fairShare={fairShare} ctx={ctx} />
       ))}
-      {!same && theirs.length > 0 && (
-        <p className="hint">Instead, the model would make: {theirs.map((m) => `${m.out.player_name} → ${m.in.player_name}`).join(", ")}
-          {" "}({signed(best)} pts/GW; see Recommended plan after undoing yours).</p>
+      {!same && (
+        <p className="ym-alt">Model's pick: {theirs.length ? `${theirs.map((m) => `${m.out.player_name} → ${m.in.player_name}`).join(", ")} (${signed(best)})` : "roll the transfer"}</p>
       )}
-      {!theirs.length && <p className="hint">The model wouldn't make a move this week: rolling the transfer adds as much.</p>}
     </section>
   );
 }
@@ -144,19 +163,12 @@ function ChipCall({ name, squad, used, nextGw }) {
   const call = chipCall(name, squad, used, nextGw);
   if (!call) return null;
   const { chip, key, sign, now, bar, later } = call;
-  const fmt = (v) => (name === "freehit" ? v.toFixed(1) : `+${v.toFixed(1)}`);
-  const what = name === "freehit" ? "your XI projects" : "it's worth";
-  const target = bar == null ? "the best week in view" : name === "freehit"
-    ? `a week your XI projects ${fmt(bar)} or less (the bar from past seasons, e.g. a blank)`
-    : `a week it's worth ${fmt(bar)} or more (the bar from past seasons)`;
-  const best = later && sign * later[key] > sign * now
-    ? ` In view, GW${later.gw} is the better week (${name === "freehit" ? `your XI projects ${fmt(later[key])}` : fmt(later[key])}).` : "";
-  let why;
-  if (model().chipPolicy.kind === "first") why = `this week ${what} ${fmt(now)}. The chip backtest found no waiting rule that
-    beat playing each chip at the first chance in every past season, so the app falls back to that.${best}`;
-  else if (chip) why = `this week ${what} ${fmt(now)}${bar != null ? `, ${name === "freehit" ? "at or below" : "at least"} ${fmt(bar)}` : ""}, and no week in view is better.`;
-  else why = `this week ${what} ${fmt(now)}; the rule waits for ${target}.${best}`;
-  return <p className={`chip-call ${chip ? "play" : "hold"}`}><b>{chip ? "Play it this week" : "Hold"}:</b> {why}</p>;
+  const fh = name === "freehit";
+  const fmt = (v) => (fh ? v.toFixed(1) : `+${v.toFixed(1)}`);
+  const parts = [`${fh ? "your XI projects" : "worth"} ${fmt(now)} now`];
+  if (bar != null && model().chipPolicy.kind !== "first") parts.push(`the bar is ${fmt(bar)}`);
+  if (later && sign * later[key] > sign * now) parts.push(`GW${later.gw} is a better week (${fmt(later[key])})`);
+  return <p className={`chip-call ${chip ? "play" : "hold"}`}><b>{chip ? "Play it this week" : "Hold"}:</b> {parts.join(" · ")}</p>;
 }
 
 // Remaining gameweeks where your players have no match or two (FPL schedules
@@ -186,27 +198,16 @@ function WildcardCheck({ squad, players, bank, priceOf, recency, freeTransfers, 
   };
   if (!result) return <button className="btn sm" onClick={check}>What would a Wildcard add now?</button>;
   const gap = result.rebuild - result.normal;
-  const rule = model().chipBacktest?.wildcard;
+  const bar = model().chipBacktest?.wildcard?.chosen?.bar;
   const last = nextGw >= stop;
-  let call;
-  if (rule?.chosen) {
-    const bar = rule.chosen.bar;
-    const play = last || (bar != null && gap >= bar);
-    call = <><b>{play ? "Play it this week" : "Hold"}:</b> {last ? "this is the last week to use it." : bar == null
-      ? "the backtest's rule plays it at the end of its window."
-      : `the rule plays it once the gap reaches +${bar.toFixed(1)} pts/GW (the bar from past seasons, `
-        + `${signed(rule.validation.gain)} ± ${rule.validation.se.toFixed(0)} pts on seasons it wasn't picked on, mostly from `
-        + "not playing it early: the projected gap is only a weak guide to what a Wildcard really adds)."}</>;
-  } else {
-    call = <>{gap > sigmaGain() ? "That's a real gap: worth considering." : "Inside the model's margin of error: keep it for later."}
-      {rule && <> No timing rule held up when Wildcards were played through {model().chipBacktest.seasons.length} past seasons,
-        so this is a judgement call.</>}</>;
-  }
+  const ruled = model().chipBacktest?.wildcard?.chosen;
+  const play = last || (ruled ? bar != null && gap >= bar : gap > sigmaGain());
+  const why = last ? "last week to use it" : !ruled ? (play ? "a real gap" : "inside the margin of error")
+    : bar == null ? "the rule plays it at the end of its window" : `the rule plays it from a +${bar.toFixed(1)} gap`;
   return (
-    <p className="chip-call">
-      A Wildcard now: <b>{signed(result.rebuild)} pts/GW</b> over the next {horizon()} GWs ({result.changes} changes),
-      against {signed(result.normal)} from your best plan with {freeTransfers} free transfer{freeTransfers === 1 ? "" : "s"}.
-      {" "}{call}
+    <p className={`chip-call ${play ? "play" : "hold"}`}>
+      <b>{play ? "Worth playing" : "Hold"}:</b> a rebuild adds {signed(result.rebuild)} pts/GW ({result.changes} changes)
+      vs {signed(result.normal)} with your free transfers · {why}
     </p>
   );
 }
@@ -217,7 +218,6 @@ function Chips({ squad, used, nextGw, players, bank, priceOf, recency, freeTrans
   const values = useMemo(() => (squad.length === 15 ? chipValues(squad) : []), [squad]);
   if (!left.length) return null;
   const valueOf = { "3xc": (v) => v.tc, bboost: (v) => v.bb };
-  const bt = model().chipBacktest;
   return (
     <section className="card chips-card">
       <h2>Chips <Beta /></h2>
@@ -240,8 +240,6 @@ function Chips({ squad, used, nextGw, players, bank, priceOf, recency, freeTrans
                 </div>
               )}
               {open && <ChipCall name={c.name} squad={squad} used={used} nextGw={nextGw} />}
-              {open && c.name === "freehit" && <small className="chip-note">A one-week squad that reverts after: worth most in a blank or double gameweek.</small>}
-              {open && c.name === "wildcard" && <small className="chip-note">Unlimited free transfers for a week, kept afterwards: best just before a run of blanks or doubles, or when your squad needs many changes.</small>}
               {open && c.name === "wildcard" && squad.length === 15 && (
                 <WildcardCheck squad={squad} players={players} bank={bank} priceOf={priceOf} recency={recency}
                   freeTransfers={freeTransfers} stop={c.stop} nextGw={nextGw} />
@@ -259,16 +257,9 @@ function Chips({ squad, used, nextGw, players, bank, priceOf, recency, freeTrans
               {w.double.length > 0 && `${w.double.length} with two (${w.double.map((p) => p.player_name).join(", ")})`}
               {" "}→ {w.blank.length >= w.double.length ? "a Free Hit week" : "a Bench Boost / Triple Captain week"}</li>
           ))}</ul>
-        ) : <small> None scheduled yet. FPL moves matches into blank and double gameweeks once cup dates are set, usually a few
-          weeks ahead; they'll show here. Free Hit pays most in a blank, Bench Boost and Triple Captain in a double.</small>}
+        ) : <small> None scheduled yet.</small>}
       </div>
-      {values.length > 0 && <p className="hint">Triple Captain adds your captain's points once more (the vice's if he
-        doesn't play); Bench Boost adds your bench's points beyond what autosubs would bring anyway. Expected points
-        for your current squad.{bt?.validation?.adopted && <> The play / hold calls follow the timing rule that won when
-        chips were played through {bt.seasons.length} past seasons: {bt.validation.gain >= 0 ? "+" : "−"}
-        {Math.abs(bt.validation.gain).toFixed(0)} ± {bt.validation.se.toFixed(0)} pts a season over playing each chip at
-        the first chance, tested on seasons it wasn't picked on. Most of that is not wasting the Free Hit; for Triple
-        Captain and Bench Boost, timing changed little.</>}</p>}
+      <More to="chips">How chips are called</More>
     </section>
   );
 }
@@ -324,9 +315,6 @@ function UpgradeTargets({ targets, bank, priceOf, onApply }) {
           : "Nothing affordable improves your team right now."}
         {upside && <> Biggest upside: <b>{label(upside)}</b> (+{upside.gain.toFixed(1)}), £{upside.need.toFixed(1)}m short.</>}
       </p>
-      <p className="hint top">Ranked by points per gameweek gained over the next {horizon()} gameweeks;
-        players showing the same gain are listed cheapest first. Each target is
-        paired with the player of yours best sold for him. His selling price plus the bank pays.</p>
       <Segmented value={pos} onChange={setPos} options={POS_TABS} className="full" />
       {groups.map(([p, list]) => (
         <div key={p} className="tg-group">
@@ -342,47 +330,13 @@ function UpgradeTargets({ targets, bank, priceOf, onApply }) {
 
 // Use the free transfer(s) or bank them, by the bar the strategy backtest set.
 function RollCheck({ roll, moves }) {
-  const bar = model().strategy;
   const g = `+${roll.gain.toFixed(1)} pts/GW`;
-  const ord = (k) => `${k}${["th", "st", "nd", "rd"][k] ?? "th"}`;
-  const held = bar?.bank?.shrink;
-  if (roll.close) return (
-    <p className="roll-check roll">
-      <b>Toss-up, rolling is fine:</b> the move projects +{(roll.gain * horizon()).toFixed(1)} pts over the next {horizon()} GWs
-      {held ? <>, and moves like it have delivered about {Math.round(held * 100)}% of their projection in past seasons
-        (+{roll.expected.toFixed(1)})</> : null}.
-      Rolling makes this next week's {ord(roll.k)} free transfer, and in past seasons that has been worth about
-      +{roll.keep.toFixed(1)} pts over the weeks that follow (a two-move week, cover for an injury){bar.bank.slope
-        ? ", more for a squad with more doubts in it, like this one has" : ""}. Played through
-      {" "}{bar.seasons.length} past seasons, holding transfers back like this neither gained nor lost
-      ({bar.bank.gain >= 0 ? "+" : "−"}{Math.abs(bar.bank.gain).toFixed(0)} ± {bar.bank.se.toFixed(0)} pts a season), so either is a sound choice.
-    </p>
-  );
-  // With no bar to clear, quote what holding out for a bigger gain did.
-  const patience = bar && !roll.minGain && bar.strategies
-    .filter((s) => s.horizon === bar.app.horizon && s.minGain > 0).sort((a, b) => a.minGain - b.minGain)[0];
-  if (roll.use && patience) return (
-    <p className="roll-check use">
-      <b>Make the move:</b> {g} per transfer. When strategies were played through {bar.seasons.length} past seasons,
-      rolling gains under +{patience.minGain}/GW instead of using the transfer scored {patience.vsBaseline >= 0 ? "+" : "−"}
-      {Math.abs(patience.vsBaseline).toFixed(0)} ± {patience.se.toFixed(0)} pts a season{patience.vsBaseline > 0
-        ? ", but a bar picked that way didn't hold up on seasons it wasn't picked on, so any gain is still worth a free transfer"
-        : ", so small gains were worth taking"} (see Strategy).
-    </p>
-  );
-  return (
-    <p className={`roll-check ${roll.use ? "use" : "roll"}`}>
-      {!roll.use ? <><b>Consider rolling:</b> the best move adds {g} per transfer, under the +{roll.minGain.toFixed(2)} a
-        transfer needed to add to pay off when strategies were played through past seasons (see Strategy). Banked, it's
-        there for next week, when there's new information.</>
-        : roll.atCap && roll.gain < roll.minGain ? <><b>Make the move:</b> it's only {g}, but you're at FPL's cap of
-        {" "}{model().max_free_transfers} free transfers, so a rolled one would be lost.</>
-        : bar ? <><b>Make the move:</b> {g} per transfer clears the +{roll.minGain.toFixed(2)} bar set by playing strategies
-          through past seasons (see Strategy){roll.worth < moves ? `; only the first ${roll.worth} clear it, so bank the rest` : ""}.</>
-        : <><b>Make the move:</b> any gain that shows is worth a free transfer. (Run <code>python main.py backtest</code> to
-          test whether a higher bar pays.)</>}
-    </p>
-  );
+  const [cls, label, why] = roll.close ? ["roll", "Toss-up", `rolling banks a free transfer worth about +${roll.keep.toFixed(1)} pts`]
+    : !roll.use ? ["roll", "Consider rolling", `${g} per transfer is under the +${roll.minGain.toFixed(2)} bar`]
+    : roll.atCap && roll.gain < roll.minGain ? ["use", "Make the move", `you're at the cap of ${model().max_free_transfers} free transfers`]
+    : roll.worth < moves ? ["use", "Make the move", `only the first ${roll.worth} clear the +${roll.minGain.toFixed(2)} bar: bank the rest`]
+    : ["use", "Make the move", roll.minGain ? `${g} per transfer clears the +${roll.minGain.toFixed(2)} bar` : "any gain is worth a free transfer"];
+  return <p className={`roll-check ${cls}`}><b>{label}:</b> {why}. <a href="#/about/transfers">Why?</a></p>;
 }
 
 export default function TransfersPanel({
@@ -405,10 +359,21 @@ export default function TransfersPanel({
     [ready, tab, squad, players, bank, priceOf, r]);
   const roll = useMemo(
     () => rollCheck({ plan, freeTransfers: ftLeft, squad }), [plan, ftLeft, squad]);
-  const planGain = plan.reduce((t, it) => t + it.gain - (it.hits * HIT_COST) / horizon(), 0);
+  // Side by side with the model's pick: the best plan for each number of
+  // moves, up to one past the free transfers (a −4 hit), in case you want it.
+  const options = useMemo(
+    () => (ready && tab === "plan" ? planOptions({ squad, players, bank, priceOf, recency: r, freeTransfers: ftLeft, upTo: ftLeft + 1 }) : []),
+    [ready, tab, squad, players, bank, priceOf, r, ftLeft]);
+  const [size, setSize] = useState(null); // moves in the plan shown; null: the model's pick
+  useEffect(() => setSize(null), [ftLeft]);
+  const count = (items) => items.reduce((t, it) => t + it.moves.length, 0);
+  const pick = count(plan);
+  const view = size ?? pick;
+  const shown = view === pick ? plan : options[view - 1] ?? [];
   const stats = useMemo(() => positionStats(players), [players]);
   const fairShare = fairShareOwnership(players);
-  const bankAfter = bank - plan.reduce((t, it) => t + it.moves.reduce((s, m) => s + m.cost, 0), 0);
+  const ctx = useMemo(() => ({ squad, players, recency: r, bank }), [squad, players, r, bank]);
+  const bankAfter = bank - shown.reduce((t, it) => t + it.moves.reduce((s, m) => s + m.cost, 0), 0);
 
   return (
     <div className="tpanel">
@@ -478,29 +443,36 @@ export default function TransfersPanel({
         <>
         {team && made > 0 && (
           <YourMoves team={team} squad={squad} players={players} priceOf={priceOf} recency={r}
-            freeTransfers={freeTransfers} stats={stats} />
+            freeTransfers={freeTransfers} stats={stats} fairShare={fairShare} />
         )}
         <section className="card">
           <div className="card-head">
-            <h2>Recommended plan</h2>
-            {plan.length > 0 && (
-              <button className="btn sm primary" onClick={() => onApply(plan.flatMap((it) => it.moves))}>Apply all</button>
+            <h2>Transfer plans</h2>
+            {shown.length > 0 && (
+              <button className="btn sm primary" onClick={() => onApply(shown.flatMap((it) => it.moves))}>Apply all</button>
             )}
           </div>
-          <p className="hint top">Gains are expected points per gameweek over the next {horizon()} gameweeks for your
-            best XI, captain and bench included. They already account for each player's chance of playing and
-            his opponents.</p>
-          {plan.length ? plan.map((it, i) => (
-            <Suggestion key={it.moves.map((m) => m.out.player_id).join("-")} item={it} i={i} priceOf={priceOf}
-              tag={tagFor(it.hits)} stats={stats} fairShare={fairShare} />
-          )) : <p className="empty">No move improves your team enough right now, so roll the transfer.</p>}
-          {plan.length > 0 && (
-            <p className="hint">≈ +{planGain.toFixed(1)} projected pts/GW for your XI
-              {plan.some((it) => it.hits) ? ` (after hits, spread over ${horizon()} GWs)` : ""},
-              leaving £{bankAfter.toFixed(1)}m in the bank. Plans maximise expected points; when two options
-              show the same gain, the cheaper one wins and the difference stays in the bank.</p>
+          <div className="plan-sizes">
+            {pick === 0 && (
+              <button className={view === 0 ? "on" : ""} onClick={() => setSize(0)}><b>Roll</b><small>model's pick</small></button>
+            )}
+            {options.map((o, k) => {
+              const items = k + 1 === pick ? plan : o;
+              const hit = items && items.reduce((t, it) => t + it.hits, 0) * HIT_COST;
+              return items && (
+                <button key={k} className={view === k + 1 ? "on" : ""} onClick={() => setSize(k + 1)}>
+                  <b>{k + 1} move{k ? "s" : ""}{hit > 0 && <em className="hit">−{hit}</em>}</b>
+                  <small>{signed(gainOf(items))} pts/GW{k + 1 === pick ? " · model's pick" : ""}</small>
+                </button>
+              );
+            })}
+          </div>
+          {shown.length ? <PlanCard items={shown} priceOf={priceOf} stats={stats} fairShare={fairShare} ctx={ctx} />
+            : <p className="empty">No move improves your team enough right now, so roll the transfer.</p>}
+          {shown.length > 0 && (
+            <p className="plan-foot">≈ {signed(gainOf(shown))} pts/GW{shown.some((it) => it.hits) ? " after hits" : ""} · £{bankAfter.toFixed(1)}m left</p>
           )}
-          {roll && <RollCheck roll={roll} moves={plan.flatMap((it) => it.moves).length} />}
+          {roll && view === pick && <RollCheck roll={roll} moves={plan.flatMap((it) => it.moves).length} />}
         </section>
         </>
       )}

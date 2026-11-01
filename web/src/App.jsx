@@ -42,7 +42,7 @@ const savedTeamId = (() => { try { return localStorage.getItem("fplTeamId") || "
 const ROUTES = PAGES.flatMap((p) => [p.id, ...(p.also ?? [])]);
 function useRoute() {
   const read = () => {
-    const id = window.location.hash.replace(/^#\/?/, "");
+    const id = window.location.hash.replace(/^#\/?/, "").split("/")[0]; // #/about/<section> is the About page
     return ROUTES.includes(id) ? id : "home";
   };
   const [route, setRoute] = useState(read);
@@ -450,7 +450,7 @@ export default function App() {
     fixtures: ["Fixtures", `Gameweeks ${nextGw}+ · ${clubs.teams.length} clubs`],
     history: ["History", team ? `${team.name} · each move graded on what was known at the time` : "Your season, week by week"],
     strategy: ["Strategy", team ? `${team.name}'s moves vs the model's, scored on real points` : "What past seasons say works"],
-    about: ["How it works", "What the app does, and how it's built and tested"],
+    about: ["About", "Who built it, how it works, and how to read each page"],
   };
   const pageInfo = PAGES.find((p) => p.id === route || p.also?.includes(route));
   useEffect(() => { document.title = `${heads[route][0]} · FPL AI`; }, [route]);
@@ -530,7 +530,7 @@ export default function App() {
       <footer className="site-footer">
         <span>FPL AI is an independent project, not affiliated with the Premier League or Fantasy Premier League.
           Projections are estimates with a margin of error.</span>
-        <span><a href="#/about">How it works</a> · <a href="https://github.com/rith777/fpl_ai">GitHub</a></span>
+        <span><a href="#/about">About</a> · <a href="https://github.com/rith777/fpl_ai">GitHub</a></span>
       </footer>
       {toast && <div className="toast" key={toast.id} role="status">{toast.msg}</div>}
     </TeamsContext.Provider>

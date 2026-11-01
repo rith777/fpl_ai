@@ -5,10 +5,8 @@ import { fdrBand } from "../lib.js";
 // Marks a feature still in development: its numbers and wording may change.
 export const Beta = () => <span className="beta" title="Still in development: numbers and wording may change">Beta</span>;
 
-// A long explanation folded away behind one line.
-export const Explainer = ({ summary = "How this works", children }) => (
-  <details className="explainer"><summary>{summary}</summary><p className="hint">{children}</p></details>
-);
+// Explanations live on the About page; a page links to its section.
+export const More = ({ to, children = "How this works" }) => <a className="more" href={`#/about/${to}`}>{children} →</a>;
 
 // Club data keyed by team id ({name, short_name, code, fixtures}) from teams.json.
 export const TeamsContext = createContext({});

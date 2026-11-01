@@ -3,7 +3,7 @@ import { fetchSeason } from "../fpl.js";
 import { identity } from "../strategy.js";
 import { HIT_COST, horizon } from "../transfers.js";
 import { gradeWeek } from "./History.jsx";
-import { Explainer, Shirt } from "./ui.jsx";
+import { More, Shirt } from "./ui.jsx";
 
 const signed = (x, d = 0) => `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(d)}`;
 const tick = () => new Promise((r) => setTimeout(r));
@@ -29,20 +29,12 @@ function Backtest({ bt }) {
   return (
     <section className="card">
       <div className="card-head"><h2>What past seasons say</h2></div>
-      <p className="st-verdict">
-        Picked on two seasons and tested on the third:{" "}
-        {v.folds.map((f, i) => (
-          <React.Fragment key={f.season}>{i ? "; " : ""}{f.season}: {ruleName(f.picked)}, {signed(f.gain)} pts vs the app's rule</React.Fragment>
-        ))}. Out of sample that's {signed(v.gain)} ± {v.se.toFixed(0)} pts a season,{" "}
-        {v.adopted ? <>a real gain, so the strategy to follow is: {ruleName(v.rule)}.</>
-          : <>{v.gain < 0 ? "worse than simply keeping" : "not more than its margin of error over"} the app's rule, so the
-            app keeps it ({ruleName(base)}). Rows that top the table only look better because they were picked after the fact.</>}
-        {patience && <> On rolling: holding out for gains of +{patience.minGain}/GW or more scored{" "}
-          {signed(patience.vsBaseline)} ± {patience.se.toFixed(0)} pts a season against using every free transfer that
-          adds points{va.adopted ? `; the app now asks for +${va.rule.minGain}/GW before using one.`
-            : patience.vsBaseline > 0 ? ", but a bar picked this way didn't hold up on the seasons it wasn't picked on, so the app still takes any gain."
-            : ", so small gains are worth taking."}</>}
-      </p>
+      <div className="hx-summary">
+        <div><small>Best rule on seasons it wasn't picked on</small><b className={v.adopted ? "up" : ""}>{signed(v.gain)} ± {v.se.toFixed(0)}</b>
+          <small>pts a season vs the app's rule · {v.adopted ? `adopted: ${ruleName(v.rule)}` : `not a real gain, so the app keeps ${ruleName(base)}`}</small></div>
+        {patience && <div><small>Rolling gains under +{patience.minGain}/GW</small><b>{signed(patience.vsBaseline)} ± {patience.se.toFixed(0)}</b>
+          <small>pts a season vs using every free transfer{va.adopted ? ` · adopted: the app asks for +${va.rule.minGain}/GW` : ""}</small></div>}
+      </div>
       <div className="st-table-wrap">
         <table className="st-table">
           <thead>
@@ -68,19 +60,7 @@ function Backtest({ bt }) {
           </tbody>
         </table>
       </div>
-      <Explainer summary="How it's tested">
-        Each past season ({bt.seasons.join(", ")}) is replayed with a model trained only on the seasons
-        before it, projecting every gameweek from the matches played before its deadline. Each strategy is the app's own
-        transfer engine with two settings: how many gameweeks ahead a move is valued over, and the least a transfer must
-        add (smaller gains are rolled, since FPL banks the free transfer). Every strategy plays each season from the same
-        {" "}{bt.starts} starting squads (the best {bt.starts} £100m squads on GW2 projections; a small early difference
-        changes every later transfer, so one run per season mostly measures luck of the path), plays no chips, and is
-        scored on what players really scored, with FPL's autosubs and vice-captaincy. Points are per season (GW2 on),
-        averaged over the starting squads; ± is the standard error over the {runs} runs. Picking the best of {rows.length}
-        {" "}strategies on the same seasons flatters the winner, so the pick is tested on a season it wasn't picked on,
-        and replaces the app's rule only if it wins there by more than its standard error, and wins on every season it was
-        tested on (runs within one season share its results, so one lucky season can't carry it).
-      </Explainer>
+      <More to="backtest">How it's tested</More>
     </section>
   );
 }
@@ -202,20 +182,7 @@ function YourMoves({ team, players }) {
           </table>
         </div>
       )}
-      <Explainer summary="How this comparison works">
-        Each week starts from your real squad, bank and free transfers at that deadline. The model's move is the one
-        it projected best then (the same plan the History page grades, rolling when nothing cleared the bar), made
-        before the matches it is scored on. A move's points are what the players brought in scored minus what the
-        players sold scored over the {H} gameweeks from that deadline (the span the model plans for), whether or not
-        they'd have started, less any hits; a roll scores 0. That's hindsight on purpose: it checks the model's calls
-        against what happened. History grades your moves on what was known at the time. One week is mostly luck, so the
-        count of weeks and the ± (from the spread of the weekly differences; neighbouring weeks share gameweeks, so if
-        anything it's too narrow) say more than any single row. Wildcard and Free
-        Hit weeks aren't compared.
-        {estimated && <> FPL doesn't share week-by-week squads with this hosted site, so your squads are worked back
-          from the squad saved in this browser through your transfers, and captains are compared only for weeks you set
-          one in this app.</>}
-      </Explainer>
+      <More to="strategy">How this comparison works</More>
     </section>
   );
 }

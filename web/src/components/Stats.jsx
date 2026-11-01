@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { METRICS, AXIS_KEYS, POSITIONS, POS_COLOR, POS_NAME, fairShareOwnership, isNailed, NAILED_MINUTES } from "../lib.js";
 import { model } from "../transfers.js";
-import { Badge, Beta, Dropdown, NextFixtures, Segmented, Shirt, TeamsContext } from "./ui.jsx";
+import { Badge, Beta, Dropdown, More, NextFixtures, Segmented, Shirt, TeamsContext } from "./ui.jsx";
 import Insights from "./Insights.jsx";
 
 const W = 760, H = 420, M = { top: 18, right: 18, bottom: 46, left: 56 };
@@ -268,9 +268,7 @@ function ValuePicks({ curves, ym, placedIds, onPick, fairShare }) {
   if (!curves.length) return null;
   return (
     <div className="value-picks">
-      <p className="hint">On the curve: the most points for the price. Nobody cheaper scores more, and paying more buys
-        fewer points per extra £m. The shaded band is the model's margin of error (±{curves[0].margin.toFixed(1)} pts):
-        players inside it are as good value as the curve, as far as the projections can tell.</p>
+      <p className="hint">On the curve: the most points for the price. Shaded: within the margin of error (±{curves[0].margin.toFixed(1)} pts). <More to="value">More</More></p>
       {curves.map((c) => {
         const rows = open.has(c.pos) ? c.near : c.near.slice(0, VALUE_LIST);
         return (

@@ -75,8 +75,7 @@ export default function League({ team, squad, players, captain, recency }) {
                   <li key={p.player_id} className="up"><span>{p.player_name}</span><small>yours, {n} of {view.seen} own him · {adjPoints(p, recency).toFixed(1)} xP</small></li>
                 ))}
               </ul>
-              <small className="hint">Pink: the biggest risks, by expected points times the share of rivals who own him. Green:
-                your best differentials, by expected points times the share who don't.</small>
+              <small className="hint">Pink: they own, you don't. Green: your differentials.</small>
             </>
           )}
         </>
