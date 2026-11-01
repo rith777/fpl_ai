@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { METRICS, AXIS_KEYS, POSITIONS, POS_COLOR, POS_NAME, fairShareOwnership, isNailed, NAILED_MINUTES } from "../lib.js";
+import { createPortal } from "react-dom";
+import { METRICS, AXIS_KEYS, POSITIONS, POS_COLOR, POS_NAME, adjPoints, fairShareOwnership, isNailed, NAILED_MINUTES } from "../lib.js";
 import { model } from "../transfers.js";
 import { Badge, Beta, Dropdown, More, NextFixtures, Segmented, Shirt, TeamsContext } from "./ui.jsx";
 import Insights from "./Insights.jsx";
@@ -78,9 +79,11 @@ const COLUMNS = [
 const ZOOM_STEP = 1.5;     // the − / + buttons
 const DRAG_MIN = 5;        // px of movement before a press counts as a drag, not a click
 const LABEL_ALL = 30;      // name every dot once this few are in view
+const TAP_REACH = 22;      // screen px: a tap picks the nearest dot this close (dots are small on phones)
 
 function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
   const [hover, setHover] = useState(null);
+  const [sel, setSel] = useState(null); // the tapped player, shown in the overview card
   const [view, setView] = useState(null);
   const [tool, setTool] = useState("box");
   const [drag, setDrag] = useState(null); // {sx, sy, ex, ey, start: view at press}
@@ -91,10 +94,11 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
   const xm = METRICS[xk], ym = METRICS[yk];
   const xs = shown.map((p) => xm.get(p, recency)), ys = shown.map((p) => ym.get(p, recency));
   // Prices start at £3.5m+, so that axis starts at the cheapest player's half-million.
-  // The top and right edges get a little room so the extreme dots aren't cut in half.
+  // Every edge gets a little room so the extreme dots aren't cut in half.
   const x0 = xk === "price" && xs.length ? Math.floor(Math.min(...xs) * 2) / 2 : Math.min(0, ...xs);
   const x1 = Math.max(1, ...xs), y0 = Math.min(0, ...ys), y1 = Math.max(1, ...ys);
-  const fit = { x0, x1: x1 + (x1 - x0) * 0.03, y0, y1: y1 + (y1 - y0) * 0.05 };
+  const padX = (x1 - x0) * 0.03, padY = (y1 - y0) * 0.05;
+  const fit = { x0: x0 - padX, x1: x1 + padX, y0: y0 - padY, y1: y1 + padY };
   const d = view ?? fit;
   const px = (v) => M.left + ((v - d.x0) / (d.x1 - d.x0 || 1)) * IW;
   const py = (v) => M.top + IH - ((v - d.y0) / (d.y1 - d.y0 || 1)) * IH;
@@ -150,8 +154,19 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
       setView({ x0: s.x0 - dx, x1: s.x1 - dx, y0: s.y0 + dy, y1: s.y1 + dy });
     }
   };
+  // The dot nearest a tap, if one is within reach on screen (null if none).
+  const nearest = (e) => {
+    const [sx, sy] = toSvg(e), reach = (TAP_REACH * W) / svgRef.current.getBoundingClientRect().width;
+    let best = null, dist = reach;
+    for (const p of inView) {
+      const g = Math.hypot(px(xm.get(p, recency)) - sx, py(ym.get(p, recency)) - sy);
+      if (g < dist) { best = p; dist = g; }
+    }
+    return best;
+  };
   const onUp = (e) => {
     touches.current.delete(e.pointerId);
+    if (drag && Math.hypot(drag.ex - drag.sx, drag.ey - drag.sy) <= DRAG_MIN && !touches.current.size) setSel(nearest(e));
     if (drag && tool === "box" && Math.abs(drag.ex - drag.sx) > DRAG_MIN && Math.abs(drag.ey - drag.sy) > DRAG_MIN) {
       const [a, b] = [ix(drag.sx), ix(drag.ex)].sort((u, v) => u - v), [c, g] = [iy(drag.sy), iy(drag.ey)].sort((u, v) => u - v);
       setView({ x0: a, x1: b, y0: c, y1: g });
@@ -188,7 +203,7 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
       <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className={`chart tool-${tool} ${drag && tool === "pan" ? "panning" : ""}`}
         role="img" aria-label={`${ym.label} against ${xm.label}`}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
-        onDoubleClick={(e) => { if (!e.target.classList.contains("dot")) setView(null); }}>
+        onDoubleClick={(e) => { if (!nearest(e)) setView(null); }}>
         <defs><clipPath id="plot-area"><rect x={M.left} y={M.top} width={IW} height={IH} /></clipPath></defs>
         {ticks(d.y0, d.y1).map((t) => (
           <g key={`y${t}`}>
@@ -219,11 +234,9 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
         {shown.map((p) => (
           <circle key={p.player_id} cx={px(xm.get(p, recency))} cy={py(ym.get(p, recency))}
             r={placedIds.has(p.player_id) ? 6.5 : 4.5} fill={POS_COLOR[p.position]}
-            className={`dot ${placedIds.has(p.player_id) ? "picked" : ""} ${hover?.p === p ? "hot" : ""} ${faded(p) ? "faded" : ""}`}
-            onMouseEnter={(e) => setHover({ p, x: e.clientX, y: e.clientY })}
-            onMouseMove={(e) => setHover({ p, x: e.clientX, y: e.clientY })}
-            onMouseLeave={() => setHover(null)}
-            onClick={() => onPick(p)} />
+            className={`dot ${placedIds.has(p.player_id) ? "picked" : ""} ${hover?.p === p || sel === p ? "hot" : ""} ${faded(p) ? "faded" : ""}`}
+            onPointerMove={(e) => e.pointerType === "mouse" && setHover({ p, x: e.clientX, y: e.clientY })}
+            onPointerLeave={() => setHover(null)} />
         ))}
         {curves.flatMap((c) => c.hull.map((q) => (
           <text key={q.p.player_id} x={px(q.x) + 7} y={py(q.y) - 7} className="vlabel">{q.p.player_name}</text>
@@ -240,9 +253,12 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
       </svg>
       <div className="legend">
         {POSITIONS.map((p) => <span key={p}><i style={{ background: POS_COLOR[p] }} />{p}</span>)}
-        <span className="legend-note">Click a dot to add or remove from your squad</span>
+        <span className="legend-note">Tap a dot for the player's overview</span>
       </div>
-      {hover && (
+      {sel && <DotCard p={sel} recency={recency} picked={placedIds.has(sel.player_id)} onPick={onPick}
+        gap={curveOf[sel.position]?.gap({ x: sel.price, y: ym.get(sel, recency) })}
+        onClose={() => setSel(null)} />}
+      {hover && hover.p !== sel && (
         <div className="scatter-tip" style={{ left: hover.x + 14, top: hover.y + 14 }}>
           <Shirt teamId={hover.p.team_id} gk={hover.p.position === "GK"} size={30} />
           <div>
@@ -258,6 +274,36 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
         </div>
       )}
     </div>
+  );
+}
+
+// A tapped dot's player at a glance: projection, minutes, fixtures, and the
+// button to add or drop him. It floats over the page (bottom corner; a sheet on
+// phones), rendered on <body> because the animated cards would pin it inside them.
+function DotCard({ p, recency, picked, onPick, gap, onClose }) {
+  const stats = [
+    ["Next GW", `${adjPoints(p, recency).toFixed(1)} pts`],
+    ["Per GW, next 3", `${adjPoints(p, recency, true).toFixed(1)} pts`],
+    ["Plays next", `${Math.round((p.start_prob ?? 0) * 100)}%`],
+    ["Owned by", `${(p.selected_by_percent ?? 0).toFixed(1)}%`],
+  ];
+  return createPortal(
+    <div className="dot-card card" style={{ "--pos": POS_COLOR[p.position] }} role="dialog" aria-label={p.player_name}>
+      <div className="dc-head">
+        <Shirt teamId={p.team_id} gk={p.position === "GK"} size={40} />
+        <div><b>{p.player_name}</b><small>{p.team} · {POS_NAME[p.position]} · £{p.price.toFixed(1)}m</small></div>
+        <button type="button" className="dc-close" onClick={onClose} aria-label="Close">✕</button>
+      </div>
+      {p.status !== "a" && p.news && <div className={`pd-news ${p.status === "d" ? "doubt" : "out"}`}>{p.news}</div>}
+      <dl className="dc-stats">{stats.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+      <div className="dc-fx"><span>Next 5</span><NextFixtures teamId={p.team_id} n={5} /></div>
+      <div className="dc-foot">
+        {gap != null && <small className={gap < 0.05 ? "on" : ""}>{gap < 0.05 ? "On the value curve" : `${gap.toFixed(1)} pts below the value curve`}</small>}
+        <button type="button" className={`btn sm ${picked ? "ghost" : "primary"}`} onClick={() => onPick(p)}>
+          {picked ? "Remove from squad" : "Add to squad"}</button>
+      </div>
+    </div>,
+    document.body,
   );
 }
 

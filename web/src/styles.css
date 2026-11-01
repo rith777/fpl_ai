@@ -635,6 +635,32 @@ dl.kv dd { margin: 0; font-weight: 700; text-align: right; }
 .vcurve .band { fill: var(--pos); opacity: 0.13; }
 .chart .vlabel { fill: var(--text); font-size: 11px; font-weight: 700; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; pointer-events: none; }
 .scatter-tip .tip-gap { color: var(--green); font-weight: 700; margin-top: 2px; }
+.dot-card {
+  position: fixed; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 35; width: 380px;
+  display: flex; flex-direction: column; gap: 10px; border-left: 3px solid var(--pos); background: var(--panel-2);
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.55); animation: sheetUp 0.25s var(--ease) both;
+}
+.dc-head { display: flex; align-items: center; gap: 10px; }
+.dc-head > div { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.25; }
+.dc-head b { font-size: 16px; }
+.dc-head small { color: var(--muted); font-size: 12.5px; }
+.dc-close { border: 0; background: rgba(255, 255, 255, 0.08); color: var(--muted); width: 32px; height: 32px; border-radius: 9px; cursor: pointer; flex: none; }
+.dc-close:hover { color: var(--text); }
+.dc-stats { margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.dc-stats div { padding: 8px 10px; border-radius: 10px; background: rgba(0, 0, 0, 0.2); }
+.dc-stats dt { color: var(--muted); font-size: 11px; }
+.dc-stats dd { margin: 2px 0 0; font-weight: 800; font-size: 15px; }
+.dc-fx { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.dc-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.dc-foot small { color: var(--muted); font-size: 12.5px; }
+.dc-foot small.on { color: var(--green); font-weight: 700; }
+.dc-foot .btn { margin-left: auto; }
+@media (max-width: 640px) {
+  /* a sheet across the bottom of the screen */
+  .dot-card { left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); width: auto; }
+  .dc-stats { grid-template-columns: 1fr 1fr; }
+}
+@keyframes sheetUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
 .value-toggle { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
 .value-toggle .hint { margin: 0; }
 .value-picks { margin-top: 14px; display: flex; flex-direction: column; gap: 14px; }
