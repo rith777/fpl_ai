@@ -200,6 +200,7 @@ function Welcome({ players, recency, nextGw, loading, onLoad, savedTeamId, recen
         <p>Load your team for this gameweek's captain, lineup, transfer and chip calls, each with the reasons behind it.</p>
         <TeamLoader initialId={savedTeamId} loading={loading} onLoad={onLoad} recent={recent} />
         <small>Your team ID is the number after <code>/entry/</code> in your FPL URL. Or <a href="#/team">build a squad from scratch →</a></small>
+        <small>New to FPL? <a href="#/start">Start here →</a></small>
       </section>
       <section className="card tw-card">
         <div className="card-head"><h2>Top projections for GW{nextGw}</h2></div>

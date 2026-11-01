@@ -130,6 +130,8 @@ python main.py all         # download, features, train, export, history, backtes
   this week, matches missed lately and injury flags. Its Chips card says when to play each
   chip, lists blank and double gameweeks for your squad, and checks what a
   Wildcard would add now.
+- New to FPL (`#/start`): how to join, how points work, chips and the ideas the app
+  uses, in plain words, with rule numbers from FPL's own settings.
 - Pages keep explanations short and link to the About page (`#/about/<section>`),
   which holds who built it, how it works and how to read each page.
 - History ends with the model's report card: for each finished gameweek, how

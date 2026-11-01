@@ -14,6 +14,7 @@ import Strategy from "./components/Strategy.jsx";
 import TransfersPanel from "./components/TransfersPanel.jsx";
 import ThisWeek from "./components/ThisWeek.jsx";
 import About from "./components/About.jsx";
+import Start from "./components/Start.jsx";
 import { Beta, Segmented, TeamsContext } from "./components/ui.jsx";
 import { fetchTeam, fetchPending, savePending, saveSquad, saveLineup, withPending, loadRecentTeams, saveRecentTeams } from "./fpl.js";
 import { configureModel, lineupCheck, lineupPoints } from "./transfers.js";
@@ -450,6 +451,7 @@ export default function App() {
     fixtures: ["Fixtures", `Gameweeks ${nextGw}+ · ${clubs.teams.length} clubs`],
     history: ["History", team ? `${team.name} · each move graded on what was known at the time` : "Your season, week by week"],
     strategy: ["Strategy", team ? `${team.name}'s moves vs the model's, scored on real points` : "What past seasons say works"],
+    start: ["New to FPL", "How the game works, in plain words, and how to join"],
     about: ["About", "Who built it, how it works, and how to read each page"],
   };
   const pageInfo = PAGES.find((p) => p.id === route || p.also?.includes(route));
@@ -462,6 +464,8 @@ export default function App() {
     page = <div className="loading"><span className="spinner" aria-hidden />Loading players…</div>;
   } else if (route === "about") {
     page = <About />;
+  } else if (route === "start") {
+    page = <Start deadline={clubs.deadlines?.[nextGw]} />;
   } else if (route === "home") {
     page = <ThisWeek clubs={clubs} team={team} loading={teamLoading} onLoad={loadTeam} savedTeamId={savedTeamId}
       recent={recent} players={players} squad={squad} nextGw={nextGw} total={total} captain={captain} vice={vice}

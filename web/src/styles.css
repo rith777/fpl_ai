@@ -839,6 +839,20 @@ h1 .beta { font-size: 11px; margin-left: 10px; }
 .about-lead { background: linear-gradient(135deg, #3d0045 0%, #61106d 55%, #2c0a40 100%); border-color: rgba(0, 255, 135, 0.28); }
 .about-lead p { max-width: 720px; margin-bottom: 14px; }
 .about-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+/* New to FPL */
+.start-steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 8px; }
+.start-steps li { color: var(--muted); line-height: 1.5; font-size: 14.5px; padding-left: 4px; }
+.start-steps li::marker { color: var(--green); font-weight: 800; }
+.start .start-tip { margin-top: 12px; font-size: 13.5px; }
+.start-points, .start-ideas { margin: 0; display: grid; grid-template-columns: minmax(120px, 190px) 1fr; gap: 8px 16px; }
+.start-points dt, .start-ideas dt { color: var(--text); font-weight: 700; font-size: 14px; }
+.start-points dd, .start-ideas dd { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.start-points dt:nth-of-type(n+2), .start-points dt:nth-of-type(n+2) + dd { border-top: 1px solid var(--line); padding-top: 8px; }
+.start-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.start-links a { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line-2); text-decoration: none; color: var(--text); }
+.start-links a:hover { border-color: var(--green); }
+.start-links small { color: var(--muted); font-size: 12.5px; }
+@media (max-width: 640px) { .start-points, .start-ideas { grid-template-columns: 1fr; gap: 2px; } .start-ideas dd, .start-points dd { margin-bottom: 8px; } }
 .about-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 10px; }
 .about > section, .about-grid { scroll-margin-top: 90px; }
 .about-h { margin: 14px 0 0; font-size: 20px; }

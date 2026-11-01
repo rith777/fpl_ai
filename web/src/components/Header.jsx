@@ -11,6 +11,7 @@ export const PAGES = [
   { id: "fixtures", label: "Fixtures" },
   { id: "history", label: "History", beta: true },
   { id: "strategy", label: "Strategy", beta: true },
+  { id: "start", label: "New to FPL" },
   { id: "about", label: "About" },
 ];
 
