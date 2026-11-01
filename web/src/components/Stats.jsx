@@ -71,6 +71,39 @@ const COLUMNS = [
   ["start_prob", "Plays"], ["avg_mins", "Mins"], ["xgi", "xGI/90"], ["cs", "CS xP"], ["defcon", "DC xP"], ["total", "Total"],
 ];
 
+// Every player's projection and price at each past deadline (history.json, the
+// History page's data), fetched once, the first time a dot is tapped.
+let historyLoad = null;
+function useSeasonHistory(want) {
+  const [h, setH] = useState(null);
+  useEffect(() => {
+    if (!want) return undefined;
+    historyLoad ??= fetch("history.json").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    let live = true;
+    historyLoad.then((d) => live && setH(d));
+    return () => { live = false; };
+  }, [want]);
+  return h;
+}
+// The axes a season path can show, read from each deadline's saved projection
+// (the model's, before any form weighting).
+const PATH_METRICS = {
+  price: (r, f) => r[f.price],
+  points: (r, f) => r[f.xp_gw][0],
+  horizon: (r, f) => r[f.xp_gw].slice(0, 3).reduce((t, v) => t + v, 0) / 3,
+  start_prob: (r, f) => r[f.start_prob] * 100,
+  if_play: (r, f) => r[f.pts_if_play],
+};
+// One player's saved rows, deadline by deadline: [{gw, row, f}].
+function seasonRows(hist, p) {
+  if (!hist?.gws) return [];
+  const f = Object.fromEntries(hist.fields.map((k, i) => [k, i]));
+  return Object.keys(hist.gws).map(Number).sort((a, b) => a - b).flatMap((gw) => {
+    const row = hist.gws[gw].find((r) => r[f.player_id] === p.player_id);
+    return row ? [{ gw, row, f }] : [];
+  });
+}
+
 // Zoom / pan: the view is the visible data window ({x0, x1, y0, y1}); null fits
 // every player. The chart is drawn in screen pixels at its real width, so dots,
 // names and axis numbers keep one size on any screen. Mouse: drag a box to zoom
@@ -97,6 +130,7 @@ function tickLabel(m, v, step) {
 function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
   const [hover, setHover] = useState(null);
   const [sel, setSel] = useState(null); // the tapped player, shown in the overview card
+  const [showPath, setShowPath] = useState(false); // his route through the season, on the chart
   const [names, setNames] = useState(true);
   const [tool, setTool] = useState("box");
   const [W, setW] = useState(760);
@@ -296,6 +330,25 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
     labelled.current = new Set(labels.map((l) => l.r.p));
   }
 
+  // The tapped player's season: deadline by deadline on these axes, ending at his dot today.
+  const hist = useSeasonHistory(!!sel);
+  const rows = useMemo(() => (sel ? seasonRows(hist, sel) : []), [hist, sel]);
+  const canPath = !!(PATH_METRICS[xk] && PATH_METRICS[yk]);
+  const path = showPath && canPath && rows.length ? [
+    ...rows.map(({ gw, row, f }) => ({ gw, x: PATH_METRICS[xk](row, f), y: PATH_METRICS[yk](row, f) })),
+    { gw: null, x: xm.get(sel, recency), y: ym.get(sel, recency) },
+  ] : null;
+
+  // Showing a path (or tapping someone else with paths on) glides to frame his whole route.
+  const pathKey = path && `${sel.player_id}-${xk}-${yk}`;
+  useEffect(() => {
+    if (!path) return;
+    const xs = path.map((q) => q.x), ys = path.map((q) => q.y);
+    const padX = Math.max((Math.max(...xs) - Math.min(...xs)) * 0.3, (fit.x1 - fit.x0) * 0.04);
+    const padY = Math.max((Math.max(...ys) - Math.min(...ys)) * 0.3, (fit.y1 - fit.y0) * 0.04);
+    glide(limit({ x0: Math.min(...xs) - padX, x1: Math.max(...xs) + padX, y0: Math.min(...ys) - padY, y1: Math.max(...ys) + padY }));
+  }, [pathKey]); // only when the route itself changes, not on every frame
+
   const r0 = small ? 4 : 5;
   const xt = ticks(d.x0, d.x1, small ? 4 : 7), yt = ticks(d.y0, d.y1, small ? 5 : 6);
   const box = boxRef.current;
@@ -317,7 +370,7 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
         <button type="button" className={`chip ct-names ${names ? "on" : ""}`} aria-pressed={names} onClick={() => setNames((v) => !v)}>Names</button>
       </div>
       <svg ref={svgRef} width={W} height={H} viewBox={`0 0 ${W} ${H}`}
-        className={`chart tool-${tool} ${gesture.current?.kind === "pan" ? "panning" : ""}`}
+        className={`chart tool-${tool} ${gesture.current?.kind === "pan" ? "panning" : ""} ${path ? "tracing" : ""}`}
         role="img" aria-label={`${ym.label} against ${xm.label}`}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
         onDoubleClick={(e) => { if (!nearest(local(e))) glide(null); }}>
@@ -355,6 +408,17 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
             onPointerMove={(e) => e.pointerType === "mouse" && !gesture.current?.kind?.match(/pan|box/) && setHover({ p, x: e.clientX, y: e.clientY })}
             onPointerLeave={() => setHover(null)} />
         ))}
+        {path && (
+          <g className="spath" style={{ "--pos": POS_COLOR[sel.position] }}>
+            <polyline points={path.map((q) => `${px(q.x)},${py(q.y)}`).join(" ")} />
+            {path.slice(0, -1).map((q, i) => (
+              <g key={q.gw}>
+                <circle cx={px(q.x)} cy={py(q.y)} r={i ? 3 : 4.5} />
+                <text x={px(q.x)} y={py(q.y) - 9} textAnchor="middle">{i ? q.gw : `GW${q.gw}`}</text>
+              </g>
+            ))}
+          </g>
+        )}
         {labels.map(({ r, x, y, left }) => (
           <text key={r.p.player_id} x={x} y={y} textAnchor={left ? "end" : "start"}
             className={`vlabel ${named.has(r.p) ? "" : "small"}`}>{r.p.player_name}</text>
@@ -369,7 +433,8 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
       </div>
       <small className="chart-help">{help}</small>
       {sel && <DotCard p={sel} recency={recency} picked={placedIds.has(sel.player_id)} onPick={onPick}
-        gap={curveOf[sel.position]?.gap({ x: sel.price, y: ym.get(sel, recency) })}
+        gap={curveOf[sel.position]?.gap({ x: sel.price, y: ym.get(sel, recency) })} rows={rows}
+        path={{ on: showPath, ok: canPath, toggle: () => setShowPath((v) => !v) }}
         onClose={() => setSel(null)} />}
       {hover && hover.p !== sel && (
         <div className="scatter-tip" style={{ left: hover.x + 14, top: hover.y + 14 }}>
@@ -393,7 +458,7 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
 // A tapped dot's player at a glance: projection, minutes, fixtures, and the
 // button to add or drop him. It floats over the page (bottom corner; a sheet on
 // phones), rendered on <body> because the animated cards would pin it inside them.
-function DotCard({ p, recency, picked, onPick, gap, onClose }) {
+function DotCard({ p, recency, picked, onPick, gap, rows, path, onClose }) {
   const stats = [
     ["Next GW", `${adjPoints(p, recency).toFixed(1)} pts`],
     ["Per GW, next 3", `${adjPoints(p, recency, true).toFixed(1)} pts`],
@@ -410,6 +475,7 @@ function DotCard({ p, recency, picked, onPick, gap, onClose }) {
       {p.status !== "a" && p.news && <div className={`pd-news ${p.status === "d" ? "doubt" : "out"}`}>{p.news}</div>}
       <dl className="dc-stats">{stats.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
       <div className="dc-fx"><span>Next 5</span><NextFixtures teamId={p.team_id} n={5} /></div>
+      <Season p={p} rows={rows} path={path} />
       <div className="dc-foot">
         {gap != null && <small className={gap < 0.05 ? "on" : ""}>{gap < 0.05 ? "On the value curve" : `${gap.toFixed(1)} pts below the value curve`}</small>}
         <button type="button" className={`btn sm ${picked ? "ghost" : "primary"}`} onClick={() => onPick(p)}>
@@ -417,6 +483,27 @@ function DotCard({ p, recency, picked, onPick, gap, onClose }) {
       </div>
     </div>,
     document.body,
+  );
+}
+
+// How the player has moved since the season began: price since GW1, and the
+// model's expected points from the first saved deadline to now, plus the
+// toggle that draws that route on the chart.
+function Season({ p, rows, path }) {
+  const start = Math.round((p.price - (p.cost_change_start ?? 0)) * 10) / 10, rise = p.price - start;
+  const r1 = (v) => Math.round(v * 10) / 10; // changes from the rounded figures, so they add up on screen
+  const first = rows[0], xpThen = first && r1(PATH_METRICS.points(first.row, first.f)), xpNow = r1(adjPoints(p, 0));
+  const move = (d, unit) => (Math.abs(d) < 0.05 ? <em>no change</em>
+    : <em className={d > 0 ? "up" : "down"}>{d > 0 ? "+" : "−"}{unit}{Math.abs(d).toFixed(1)}</em>);
+  return (
+    <div className="dc-season">
+      <div><span>Price</span><b>£{start.toFixed(1)}m → £{p.price.toFixed(1)}m</b>{move(rise, "£")}<small>since GW1</small></div>
+      {first && <div><span>Expected pts</span><b>{xpThen.toFixed(1)} → {xpNow.toFixed(1)}</b>{move(xpNow - xpThen, "")}<small>since GW{first.gw}</small></div>}
+      <button type="button" className={`chip ${path.on && path.ok ? "on" : ""}`} aria-pressed={path.on} disabled={!path.ok || !rows.length}
+        title={path.ok ? "Draw his route through the season on the chart" : "Set the axes to price, expected points or chance of playing"}
+        onClick={path.toggle}>Season path</button>
+      {!path.ok && <small className="dc-note">Season path works with price, expected points and chance of playing on the axes.</small>}
+    </div>
   );
 }
 

@@ -652,6 +652,24 @@ dl.kv dd { margin: 0; font-weight: 700; text-align: right; }
 .dc-stats dt { color: var(--muted); font-size: 11px; }
 .dc-stats dd { margin: 2px 0 0; font-weight: 800; font-size: 15px; }
 .dc-fx { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.dc-season { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 10px; border-radius: 10px; background: rgba(0, 0, 0, 0.2); font-size: 13px; }
+.dc-season > div { display: flex; align-items: baseline; gap: 6px; }
+.dc-season span { color: var(--muted); font-size: 11.5px; }
+.dc-season em { font-style: normal; font-weight: 700; font-size: 12px; color: var(--muted); }
+.dc-season em.up { color: var(--green); }
+.dc-season em.down { color: #ff8fb8; }
+.dc-season small { color: var(--faint); font-size: 11px; }
+.dc-season .chip { margin-left: auto; padding: 5px 11px; }
+.dc-season .chip:disabled { opacity: 0.45; cursor: default; }
+.dc-note { flex-basis: 100%; }
+.chart .spath polyline { fill: none; stroke: var(--pos); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; opacity: 0.9; }
+.chart .spath circle { fill: var(--bg); stroke: var(--pos); stroke-width: 2; }
+.chart .spath text { fill: var(--text); font-size: 11px; font-weight: 800; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+.chart .spath { pointer-events: none; }
+/* while a season path is shown, everyone else steps back */
+.chart.tracing .dot:not(.hot) { opacity: 0.22; }
+.chart.tracing .vlabel.small { opacity: 0.3; }
+.chart .spath text { font-size: 10.5px; }
 .dc-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .dc-foot small { color: var(--muted); font-size: 12.5px; }
 .dc-foot small.on { color: var(--green); font-weight: 700; }
@@ -659,7 +677,11 @@ dl.kv dd { margin: 0; font-weight: 700; text-align: right; }
 @media (max-width: 640px) {
   /* a sheet across the bottom of the screen */
   .dot-card { left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); width: auto; }
-  .dc-stats { grid-template-columns: 1fr 1fr; }
+  .dot-card { gap: 8px; padding: 12px; }
+  .dc-stats { gap: 5px; }
+  .dc-stats div { padding: 6px 7px; }
+  .dc-stats dt { font-size: 10px; line-height: 1.2; }
+  .dc-stats dd { font-size: 13.5px; }
 }
 @keyframes sheetUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
 .value-toggle { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
