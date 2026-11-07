@@ -2,7 +2,7 @@ import React, { useContext, useDeferredValue, useEffect, useMemo, useState } fro
 import { POS_COLOR, POS_NAME, POSITIONS, fairShareOwnership } from "../lib.js";
 import {
   HIT_COST, chipValues, horizon, model, moveVerdict, planCase, planGain as gainOf, planOptions, positionStats, rollCheck,
-  sigmaGain, squadGain, transferPlan, upgradeTargets, userKeep,
+  sigmaGain, squadGain, transferPlan, upgradeTargets, userPlanOptions,
 } from "../transfers.js";
 import { CHIP_NAMES, chipsLeft } from "../rules.js";
 import { TIMED_CHIPS, chooseChip } from "../strategy.js";
@@ -344,14 +344,13 @@ function RollCheck({ roll, moves }) {
 function PatientToggle({ patient, setPatient }) {
   const bank = model().strategy?.bank;
   if (!bank || !setPatient) return null;
-  const worth = bank.value.slice(2, 4).map((v) => v.toFixed(1)).join(" / ");
   return (
     <div className="patient">
       <Segmented value={patient ? "patient" : "use"} onChange={(v) => setPatient(v === "patient")}
         options={[{ value: "use", label: "Use on any gain" }, { value: "patient", label: "Patient" }]} />
       <p className="hint">
         {patient
-          ? `A transfer is only used when the move beats saving it. On past seasons a saved 2nd / 3rd free transfer was worth about ${worth} pts.`
+          ? `A transfer is only used on a move the model is sure of: one that adds more than its margin of error (+${sigmaGain().toFixed(1)} pts/GW) and beats saving the transfer. Selling a player who's ruled out always counts.`
           : "Every free transfer goes on the best move that adds points, however small."}
         {" "}On past seasons neither way clearly won (<a href="#/about/transfers">why</a>).
       </p>
@@ -372,7 +371,7 @@ export default function TransfersPanel({
   const ftLeft = Math.max(0, freeTransfers - made);
   const hits = Math.max(0, made - freeTransfers) * HIT_COST;
   const plan = useMemo(
-    () => (ready && tab === "plan" ? transferPlan({ squad, players, bank, priceOf, recency: r, freeTransfers: ftLeft, keep: userKeep() }) : []),
+    () => (ready && tab === "plan" ? transferPlan({ squad, players, bank, priceOf, recency: r, freeTransfers: ftLeft, ...userPlanOptions() }) : []),
     [ready, tab, squad, players, bank, priceOf, r, ftLeft, patient]);
   const targets = useMemo(
     () => (ready && tab === "upgrades" ? upgradeTargets({ squad, players, bank, priceOf, recency: r }) : null),

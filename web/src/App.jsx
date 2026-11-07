@@ -508,7 +508,7 @@ export default function App() {
   } else if (route === "fixtures") {
     page = <Fixtures currentGw={clubs.current_gw} squad={squad} />;
   } else if (route === "plan") {
-    page = <Plan squad={squad} nextGw={nextGw} deadlines={clubs.deadlines} teamId={team?.id} />;
+    page = <Plan squad={squad} players={players} bank={budget - spent} priceOf={priceOf} recency={recency} nextGw={nextGw} deadlines={clubs.deadlines} teamId={team?.id} />;
   } else if (route === "history") {
     page = <History team={team} players={players} />;
   } else if (route === "strategy") {

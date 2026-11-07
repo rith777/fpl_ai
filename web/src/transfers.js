@@ -28,6 +28,14 @@ export const setPatient = (on) => { PATIENT = !!on; };
 export const isPatient = () => PATIENT;
 // What a banked transfer is worth for this week's plans.
 export const userKeep = () => (PATIENT ? MODEL.strategy?.bank ?? MODEL.strategy?.keep : MODEL.strategy?.keep);
+// This week's planner settings for the manager's choice. Patient also asks each
+// transfer to clear the model's margin of error (sigmaGain: a gain smaller than
+// that may be noise), except a sale of a player ruled out, which is never noise.
+export const userPlanOptions = () => (PATIENT
+  ? { keep: userKeep(), minGain: sigmaGain(), sellUnavailable: true }
+  : { keep: userKeep() });
+// Ruled out (injured, suspended, unavailable or left the club); a doubt still may play.
+export const unavailable = (p) => !!p.status && p.status !== "a" && p.status !== "d";
 export const model = () => MODEL;
 // Each projection carries the model's error (sigma_mean, measured out of sample);
 // a difference between two players carries sqrt(2) of it. Gaps smaller than
@@ -325,14 +333,18 @@ const planBankCost = (ctx, items) => {
   return Array.from({ length: free }, (_, j) => bankCost(ctx, j)).reduce((t, x) => t + x, 0);
 };
 
+// The bar a move must clear: `minGain`, unless (with `sellUnavailable`) every
+// player it sells is ruled out.
+const barFor = (ctx, m) => (ctx.sellUnavailable && m.moves.every((x) => unavailable(x.out)) ? 0 : ctx.minGain ?? 0);
+
 function greedy(ctx, squad, bank, used) {
   const items = [];
-  const min = ctx.minGain ?? 0;
   while (used + items.length < squad.length) {
     const [m] = bestMoves({ ...ctx, squad, bank });
     if (!m) break;
     const hits = used + items.length >= ctx.freeTransfers ? 1 : 0;
     if (hits && ctx.noHits) break;
+    const min = barFor(ctx, m);
     if (hits ? (m.gain - min) * horizon() - HIT_COST <= 0 : shown(m.gain - min - bankCost(ctx, used + items.length)) <= 0) break;
     items.push({ ...m, hits });
     squad = applyMoves(squad, m.moves);
@@ -364,8 +376,9 @@ const planCost = (items) => items.reduce((t, it) => t + spend(it.moves), 0);
 // null values every transfer at nothing kept.
 export function transferPlan({
   squad, players, bank, priceOf, recency, freeTransfers, minGain = 0, noHits = false, keep = MODEL.strategy?.keep,
+  sellUnavailable = false,
 }) {
-  const ctx = { squad, players, priceOf, recency, freeTransfers, minGain, noHits, keep };
+  const ctx = { squad, players, priceOf, recency, freeTransfers, minGain, noHits, keep, sellUnavailable };
   const plain = greedy(ctx, squad, bank, 0);
   const hits = Math.max(0, 2 - freeTransfers);
   const pair = !(hits && noHits) && bestPair({ squad, players, bank, priceOf, recency });
@@ -374,7 +387,7 @@ export function transferPlan({
   // Plans compared net of the banked transfers they use up.
   const net = (items) => planGain(items) - planBankCost(ctx, items);
   const better = sameGain(net(opened), net(plain)) ? planCost(opened) < planCost(plain) : net(opened) > net(plain);
-  const plan = net(opened.slice(0, 1)) > 2 * minGain && better ? opened : plain;
+  const plan = net(opened.slice(0, 1)) > 2 * barFor(ctx, pair) && better ? opened : plain;
   return freeTransfers >= squad.length ? rebuilt(ctx, plan, bank) : plan;
 }
 
