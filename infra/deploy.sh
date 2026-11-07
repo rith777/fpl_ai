@@ -38,9 +38,13 @@ case "${1:-}" in
   site)
     (cd web && npm run build)
     bucket=$(out SiteBucket)
-    # Hashed assets never change; data refreshes every few hours; the page itself is always checked.
+    # Hashed assets never change; data refreshes every few hours; the page and
+    # the home-screen app files (offline worker, manifest, icons) are always checked.
+    app=(--exclude "*" --include sw.js --include manifest.webmanifest --include "icon-*.png")
     aws s3 sync web/dist "s3://$bucket" --delete --exclude "*.json" --exclude index.html \
+      --exclude sw.js --exclude manifest.webmanifest --exclude "icon-*.png" \
       --cache-control "public,max-age=31536000,immutable"
+    aws s3 sync web/dist "s3://$bucket" "${app[@]}" --cache-control "no-cache"
     aws s3 sync web/dist "s3://$bucket" --delete --exclude "*" --include "*.json" \
       --exclude pending_transfers.json --cache-control "public,max-age=300"
     aws s3 cp web/dist/index.html "s3://$bucket/index.html" --cache-control "no-cache"

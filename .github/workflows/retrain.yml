@@ -1,0 +1,37 @@
+# Refits the live models every week on every match played so far, this
+# season's included (`python main.py retrain`; held out, it ranked players
+# better in every season tested), and uploads them for the 6-hourly refresh.
+# Pre-season and backtest models are pulled first and kept as they are.
+name: Retrain models
+
+on:
+  schedule:
+    - cron: "0 5 * * 2"  # Tuesdays 05:00 UTC, once the weekend's matches are in
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: eu-central-1
+      - run: pip install -r requirements.txt
+      - run: infra/deploy.sh pull-models
+      - run: python main.py retrain
+      - run: infra/deploy.sh models

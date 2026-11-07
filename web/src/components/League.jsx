@@ -67,16 +67,24 @@ export default function League({ team, squad, players, captain, recency }) {
             <>
               <p className="tw-line">Of {view.seen === 1 ? "your nearest rival's squad" : `your ${view.seen} nearest rivals' squads`} (GW{team.gw}):
                 {captain && <> {view.captained} captained {captain.player_name}.</>}</p>
-              <ul className="lg-list">
-                {view.missing.map(({ p, n }) => (
-                  <li key={p.player_id} className="down"><span>{p.player_name}</span><small>{n} of {view.seen} own him, you don't · {adjPoints(p, recency).toFixed(1)} xP</small></li>
-                ))}
-                {view.yours.map(({ p, n }) => (
-                  <li key={p.player_id} className="up"><span>{p.player_name}</span><small>yours, {n} of {view.seen} own him · {adjPoints(p, recency).toFixed(1)} xP</small></li>
-                ))}
-              </ul>
-              <small className="hint">Pink: the biggest risks, by expected points times the share of rivals who own him. Green:
-                your best differentials, by expected points times the share who don't.</small>
+              <div className="lg-lists">
+                <div>
+                  <span className="w-label">They own, you don't</span>
+                  <ul className="lg-list">
+                    {view.missing.map(({ p, n }) => (
+                      <li key={p.player_id} className="down"><span>{p.player_name}</span><small>{n} of {view.seen} own him · {adjPoints(p, recency).toFixed(1)} xP</small></li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <span className="w-label">Your differentials</span>
+                  <ul className="lg-list">
+                    {view.yours.map(({ p, n }) => (
+                      <li key={p.player_id} className="up"><span>{p.player_name}</span><small>{n} of {view.seen} own him · {adjPoints(p, recency).toFixed(1)} xP</small></li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
             </>
           )}
         </>

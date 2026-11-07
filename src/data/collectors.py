@@ -24,15 +24,15 @@ class HistoricalDataCollector:
         self.base_url = base_url
 
     def download_season(self, season: str, raw_path: Path) -> bool:
-        """Fetch ``merged_gw.csv`` for one season. Returns True on success."""
-        url = f"{self.base_url}/{season}/gws/merged_gw.csv"
+        """Fetch ``merged_gw.csv`` for one season, and ``players_raw.csv`` (each
+        player's id that season against his lasting ``code``). Returns True on success."""
         dest_dir = Path(raw_path) / season
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / "merged_gw.csv"
         try:
-            resp = requests.get(url, timeout=30)
-            resp.raise_for_status()
-            dest.write_bytes(resp.content)
+            for path in ("gws/merged_gw.csv", "players_raw.csv"):
+                resp = requests.get(f"{self.base_url}/{season}/{path}", timeout=30)
+                resp.raise_for_status()
+                (dest_dir / Path(path).name).write_bytes(resp.content)
             return True
         except requests.RequestException as exc:
             print(f"   failed to download {season}: {exc}")
@@ -58,7 +58,7 @@ class HistoricalDataCollector:
             dest = Path(raw_path) / season / "merged_gw.csv"
             if not (Path(raw_path) / season / "odds.csv").exists():
                 print(f"   {season}: {self.download_odds(season, raw_path)} matches with odds")
-            if dest.exists():
+            if dest.exists() and (dest.parent / "players_raw.csv").exists():
                 print(f"   {season}: already present")
                 downloaded.append(season)
                 continue
@@ -143,6 +143,7 @@ class FPLApiClient:
             rows.append(
                 {
                     "player_id": el["id"],
+                    "code": el["code"],  # the same player across seasons (ids change)
                     "player_name": el["web_name"],
                     "full_name": f"{el['first_name']} {el['second_name']}".strip(),
                     "team_id": el["team"],

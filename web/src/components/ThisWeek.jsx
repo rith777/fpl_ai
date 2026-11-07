@@ -5,7 +5,7 @@ import { HIT_COST, horizon, model, rollCheck, transferPlan } from "../transfers.
 import { chipCall, tagFor } from "./TransfersPanel.jsx";
 import { TeamLoader } from "./Header.jsx";
 import League from "./League.jsx";
-import { Beta, NextFixtures, Shirt } from "./ui.jsx";
+import { Badge, Beta, NextFixtures, Shirt } from "./ui.jsx";
 
 // "2d 4h", "3h 12m", "8m": time to or since a moment.
 function span(ms) {
@@ -27,32 +27,33 @@ const Player = ({ p, sub }) => (
   </div>
 );
 
-// The gameweek's deadline, the squad's projection and how fresh the data is.
-function Deadline({ clubs, nextGw, total, now }) {
-  const at = clubs.deadline && new Date(clubs.deadline);
-  const left = at ? at - now : null;
+const when = (d) => new Date(d).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+// The gameweek at a glance: deadline, the squad's projection, transfers and money.
+function Status({ clubs, nextGw, total, now, team, ftLeft, bank }) {
+  const left = clubs.deadline ? new Date(clubs.deadline) - now : null;
+  const tiles = [
+    [`GW${nextGw} deadline`, left == null ? "—" : left > 0 ? span(left) : "Passed", clubs.deadline && when(clubs.deadline)],
+    total != null && ["Your XI projects", total.toFixed(1), "pts, captain and autosubs included", "grad"],
+    team && ["Free transfers", ftLeft, ftLeft === 1 ? "this week" : "to use or roll"],
+    team && ["In the bank", `£${bank.toFixed(1)}m`, "after planned moves"],
+    team?.rank && ["Overall rank", team.rank.toLocaleString(), team.points != null && `${team.points} pts so far`],
+  ].filter(Boolean);
   return (
-    <section className="card tw-deadline">
-      <div>
-        <span className="w-label">GW{nextGw} deadline</span>
-        {at ? (
-          <>
-            <b className="tw-count">{left > 0 ? span(left) : "Passed"}</b>
-            <small>{at.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</small>
-          </>
-        ) : <b className="tw-count">—</b>}
-      </div>
-      {total != null && (
-        <div>
-          <span className="w-label">Your XI projects</span>
-          <b className="tw-count grad">{total.toFixed(1)}</b>
-          <small>points, captain and bench autosubs included</small>
+    <section className="card tw-status">
+      {tiles.map(([label, value, sub, cls]) => (
+        <div key={label}>
+          <span className="w-label">{label}</span>
+          <b className={`tw-count ${cls ?? ""}`}>{value}</b>
+          {sub && <small>{sub}</small>}
         </div>
-      )}
+      ))}
       {clubs.updated && <small className="tw-fresh">Projections updated {span(now - new Date(clubs.updated))} ago</small>}
     </section>
   );
 }
+
+const Heading = ({ children }) => <h2 className="tw-section">{children}</h2>;
 
 // The best transfer(s) with the free transfers left, or the call to roll.
 function Transfer({ squad, players, bank, priceOf, recency, freeTransfers, made, onApply }) {
@@ -66,7 +67,7 @@ function Transfer({ squad, players, bank, priceOf, recency, freeTransfers, made,
   return (
     <section className="card tw-card">
       <div className="card-head">
-        <h2>Transfer</h2>
+        <h2>Transfers</h2>
         <span className={`hx-verdict ${made ? "neutral" : roll?.close ? "ok" : use ? "good" : "ok"}`}>
           {made ? `${made} planned` : roll?.close ? "Toss-up" : use ? "Make the move" : "Roll"}</span>
       </div>
@@ -168,7 +169,7 @@ function Timeline({ clubs, squad, used, nextGw, ftLeft }) {
     return [];
   });
   return (
-    <section className="card tw-card tw-wide">
+    <section className="card tw-card">
       <div className="card-head"><h2>Next {gws.length} gameweeks</h2></div>
       <div className="tw-timeline">
         {gws.map((gw, i) => {
@@ -190,26 +191,71 @@ function Timeline({ clubs, squad, used, nextGw, ftLeft }) {
   );
 }
 
-// Without a team: what the app does, the team-ID box, and this week's top projections.
-function Welcome({ players, recency, nextGw, loading, onLoad, savedTeamId, recent }) {
-  const top = useMemo(() => [...players].sort((a, b) => adjPoints(b, recency) - adjPoints(a, recency)).slice(0, 5), [players, recency]);
+const FEATURES = [
+  ["Captain & lineup", "Who to captain, who to start, and your bench order, by expected points.", "#/team"],
+  ["Transfer plans", "The best plan for each number of moves, with the case for and against each one.", "#/transfers"],
+  ["Chip timing", "When to play each chip, using timing rules tested on past seasons.", "#/about/chips"],
+  ["Graded history", "Every past move checked against what was known at the time.", "#/history"],
+];
+const RUN = 5;
+
+// Without a team: what the app does, the team-ID box, and this week's top
+// projections and easiest fixture runs.
+function Welcome({ clubs, players, recency, nextGw, loading, onLoad, savedTeamId, recent, now }) {
+  const top = useMemo(() => [...players].sort((a, b) => adjPoints(b, recency) - adjPoints(a, recency)).slice(0, 6), [players, recency]);
+  const runs = useMemo(() => clubs.teams.map((t) => {
+    const fx = (t.fixtures ?? []).filter((f) => f.gw < nextGw + RUN);
+    return { t, avg: fx.length ? fx.reduce((s, f) => s + f.fdr, 0) / fx.length : 9 };
+  }).sort((a, b) => a.avg - b.avg).slice(0, 6), [clubs, nextGw]);
+  const left = clubs.deadline ? new Date(clubs.deadline) - now : null;
   return (
     <>
       <section className="card tw-hero">
-        <h2>Your FPL week, planned</h2>
-        <p>Load your team for this gameweek's captain, lineup, transfer and chip calls, each with the reasons behind it.</p>
-        <TeamLoader initialId={savedTeamId} loading={loading} onLoad={onLoad} recent={recent} />
-        <small>Your team ID is the number after <code>/entry/</code> in your FPL URL. Or <a href="#/team">build a squad from scratch →</a></small>
-      </section>
-      <section className="card tw-card">
-        <div className="card-head"><h2>Top projections for GW{nextGw}</h2></div>
-        {top.map((p) => (
-          <div className="tw-top" key={p.player_id}>
-            <Player p={p} sub={<>{p.team} · {p.position} <NextFixtures teamId={p.team_id} n={3} /></>} />
-            <b>{adjPoints(p, recency).toFixed(1)}</b>
+        <div className="tw-hero-main">
+          <span className="eyebrow">Fantasy Premier League assistant</span>
+          <h2>Your FPL week, planned</h2>
+          <p>Load your team for this gameweek's captain, lineup, transfer and chip calls, each with the reasons behind it.</p>
+          <TeamLoader initialId={savedTeamId} loading={loading} onLoad={onLoad} recent={recent} />
+          <small>Your team ID is the number after <code>/entry/</code> in your FPL URL.</small>
+          <div className="tw-hero-links">
+            <a href="#/team">Build a squad from scratch →</a>
+            <a href="#/start">New to FPL? Start here →</a>
           </div>
-        ))}
+        </div>
+        <div className="tw-hero-side">
+          <span className="w-label">GW{nextGw} deadline</span>
+          <b className="tw-count">{left == null ? "—" : left > 0 ? span(left) : "Passed"}</b>
+          {clubs.deadline && <small>{when(clubs.deadline)}</small>}
+          {clubs.updated && <small className="faint">Projections updated {span(now - new Date(clubs.updated))} ago</small>}
+        </div>
       </section>
+
+      <div className="tw-features">
+        {FEATURES.map(([title, text, href]) => (
+          <a key={title} href={href}><b>{title}</b><small>{text}</small></a>
+        ))}
+      </div>
+
+      <div className="tw-row">
+        <section className="card tw-card">
+          <div className="card-head"><h2>Top projections for GW{nextGw}</h2><a className="more" href="#/stats">All players →</a></div>
+          {top.map((p) => (
+            <div className="tw-top" key={p.player_id}>
+              <Player p={p} sub={<>{p.team} · {p.position} <NextFixtures teamId={p.team_id} n={3} /></>} />
+              <b>{adjPoints(p, recency).toFixed(1)}</b>
+            </div>
+          ))}
+        </section>
+        <section className="card tw-card">
+          <div className="card-head"><h2>Easiest runs, next {RUN} GWs</h2><a className="more" href="#/fixtures">All fixtures →</a></div>
+          {runs.map(({ t }) => (
+            <div className="tw-top" key={t.id}>
+              <div className="tw-player"><Badge teamId={t.id} size={28} /><div><b>{t.name}</b>
+                <small><NextFixtures teamId={t.id} n={RUN} /></small></div></div>
+            </div>
+          ))}
+        </section>
+      </div>
     </>
   );
 }
@@ -218,28 +264,32 @@ export default function ThisWeek(props) {
   const { clubs, team, loading, squad, nextGw, total, captain, vice, lineup, onBestXI, recency } = props;
   const now = useNow();
   const ready = squad.length === 15;
+  const ftLeft = Math.max(0, props.freeTransfers - props.made);
+  if (loading && !team) return <div className="loading"><span className="spinner" aria-hidden />Loading your team…</div>;
+  if (!ready && !team?.needsSquad) return <div className="tw-page"><Welcome {...props} now={now} /></div>;
   return (
-    <div className="tw-grid">
-      <Deadline clubs={clubs} nextGw={nextGw} total={ready ? total : null} now={now} />
-      {loading && !team ? (
-        <div className="loading"><span className="spinner" aria-hidden />Loading your team…</div>
-      ) : team?.needsSquad && !ready ? (
-        <section className="card tw-hero">
+    <div className="tw-page">
+      <Status clubs={clubs} nextGw={nextGw} total={ready ? total : null} now={now} team={team} ftLeft={ftLeft} bank={props.bank} />
+      {!ready ? (
+        <section className="card tw-hero solo">
           <h2>One step left: add your squad</h2>
           <p>FPL shares your team's bank, rank and transfers with this site, but not the squad itself. Pick your 15
             players once; they're saved in this browser, and transfers you make on FPL are picked up after that.</p>
           <a className="btn primary" href="#/team">Add my squad →</a>
         </section>
-      ) : !ready ? (
-        <Welcome {...props} />
       ) : (
         <>
-          <Lineup captain={captain} vice={vice} lineup={lineup} onBestXI={onBestXI} recency={recency} />
-          <Transfer {...props} />
-          {team && <Chips squad={squad} used={team.chipsUsed} nextGw={nextGw} />}
-          {team?.leagues?.length > 0 && <League team={team} squad={squad} players={props.players} captain={captain} recency={recency} />}
-          {team && <Timeline clubs={clubs} squad={squad} used={team.chipsUsed} nextGw={nextGw}
-            ftLeft={Math.max(0, props.freeTransfers - props.made)} />}
+          <Heading>This week's calls</Heading>
+          <div className="tw-calls">
+            <Lineup captain={captain} vice={vice} lineup={lineup} onBestXI={onBestXI} recency={recency} />
+            <Transfer {...props} />
+            {team && <Chips squad={squad} used={team.chipsUsed} nextGw={nextGw} />}
+          </div>
+          {team && <>
+            <Heading>Coming up</Heading>
+            <Timeline clubs={clubs} squad={squad} used={team.chipsUsed} nextGw={nextGw} ftLeft={ftLeft} />
+            {team.leagues?.length > 0 && <League team={team} squad={squad} players={props.players} captain={captain} recency={recency} />}
+          </>}
         </>
       )}
     </div>

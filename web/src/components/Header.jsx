@@ -1,9 +1,10 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { CHIP_NAMES } from "../rules.js";
 import { Beta, useOutside } from "./ui.jsx";
 
 // Nav tabs; `also` lists the routes a tab covers (My Team's Pick / Transfers
-// modes); `beta` marks pages still in development.
+// modes); `beta` marks pages still in development; `guide` pages (reading,
+// not tools) sit apart at the end.
 export const PAGES = [
   { id: "home", label: "This week" },
   { id: "team", label: "My Team", also: ["transfers"] },
@@ -11,7 +12,8 @@ export const PAGES = [
   { id: "fixtures", label: "Fixtures" },
   { id: "history", label: "History", beta: true },
   { id: "strategy", label: "Strategy", beta: true },
-  { id: "about", label: "How it works" },
+  { id: "start", label: "New to FPL", guide: true },
+  { id: "about", label: "About", guide: true },
 ];
 
 export const recencyLabel = (r) => (r === 0 ? "Season" : r === 1 ? "Form" : `${Math.round(r * 100)}% form`);
@@ -62,9 +64,16 @@ export default function Header({ page, recency, setRecency, team, teamLoading, s
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useOutside(ref, () => setOpen(false), open);
+  // Phones: pages and the projection blend live behind a menu button.
+  const [menu, setMenu] = useState(false);
+  useEffect(() => {
+    const close = () => setMenu(false);
+    window.addEventListener("hashchange", close);
+    return () => window.removeEventListener("hashchange", close);
+  }, []);
 
   return (
-    <header className="topbar">
+    <header className={`topbar ${menu ? "open" : ""}`}>
       <div className="topbar-inner">
         <a className="brand" href="#/home" aria-label="FPL AI home">
           <span className="brand-mark" aria-hidden>◆</span>
@@ -74,7 +83,7 @@ export default function Header({ page, recency, setRecency, team, teamLoading, s
         <nav className="nav" aria-label="Pages">
           {PAGES.map((p) => {
             const on = page === p.id || p.also?.includes(page);
-            return <a key={p.id} href={`#/${p.id}`} className={on ? "active" : ""} aria-current={on ? "page" : undefined}>{p.label}{p.beta && <Beta />}</a>;
+            return <a key={p.id} href={`#/${p.id}`} className={[on && "active", p.guide && "guide"].filter(Boolean).join(" ")} aria-current={on ? "page" : undefined}>{p.label}{p.beta && <Beta />}</a>;
           })}
         </nav>
 
@@ -130,6 +139,8 @@ export default function Header({ page, recency, setRecency, team, teamLoading, s
               </div>
             )}
           </div>
+          <button type="button" className="menu-btn" aria-label={menu ? "Close menu" : "Menu"} aria-expanded={menu}
+            onClick={() => setMenu((m) => !m)}>{menu ? "✕" : "☰"}</button>
         </div>
       </div>
     </header>

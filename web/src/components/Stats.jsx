@@ -1,11 +1,10 @@
-import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { METRICS, AXIS_KEYS, POSITIONS, POS_COLOR, POS_NAME, fairShareOwnership, isNailed, NAILED_MINUTES } from "../lib.js";
+import React, { useContext, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { METRICS, AXIS_KEYS, POSITIONS, POS_COLOR, POS_NAME, adjPoints, fairShareOwnership, isNailed, NAILED_MINUTES } from "../lib.js";
 import { model } from "../transfers.js";
-import { Badge, Beta, Dropdown, NextFixtures, Segmented, Shirt, TeamsContext } from "./ui.jsx";
+import { Badge, Beta, Dropdown, More, NextFixtures, Segmented, Shirt, TeamsContext } from "./ui.jsx";
 import Insights from "./Insights.jsx";
 
-const W = 760, H = 420, M = { top: 18, right: 18, bottom: 46, left: 56 };
-const IW = W - M.left - M.right, IH = H - M.top - M.bottom;
 // Round tick values (1, 2, 2.5 or 5 × a power of ten apart), about n across the range.
 function ticks(min, max, n = 6) {
   const raw = (max - min || 1) / n, mag = 10 ** Math.floor(Math.log10(raw));
@@ -72,138 +71,324 @@ const COLUMNS = [
   ["start_prob", "Plays"], ["avg_mins", "Mins"], ["xgi", "xGI/90"], ["cs", "CS xP"], ["defcon", "DC xP"], ["total", "Total"],
 ];
 
-// Zoom / pan: `view` is the visible data window ({x0, x1, y0, y1}); null fits
-// every player. Pinch (or Ctrl/⌘ + scroll) zooms at the cursor, dragging draws
-// a box to zoom into (or pans, with the pan tool), double-click resets.
-const ZOOM_STEP = 1.5;     // the − / + buttons
-const DRAG_MIN = 5;        // px of movement before a press counts as a drag, not a click
-const LABEL_ALL = 30;      // name every dot once this few are in view
+// Every player's projection and price at each past deadline (history.json, the
+// History page's data), fetched once, the first time a dot is tapped.
+let historyLoad = null;
+function useSeasonHistory(want) {
+  const [h, setH] = useState(null);
+  useEffect(() => {
+    if (!want) return undefined;
+    historyLoad ??= fetch("history.json").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    let live = true;
+    historyLoad.then((d) => live && setH(d));
+    return () => { live = false; };
+  }, [want]);
+  return h;
+}
+// The axes a season path can show, read from each deadline's saved projection
+// (the model's, before any form weighting).
+const PATH_METRICS = {
+  price: (r, f) => r[f.price],
+  points: (r, f) => r[f.xp_gw][0],
+  horizon: (r, f) => r[f.xp_gw].slice(0, 3).reduce((t, v) => t + v, 0) / 3,
+  start_prob: (r, f) => r[f.start_prob] * 100,
+  if_play: (r, f) => r[f.pts_if_play],
+};
+// One player's saved rows, deadline by deadline: [{gw, row, f}].
+function seasonRows(hist, p) {
+  if (!hist?.gws) return [];
+  const f = Object.fromEntries(hist.fields.map((k, i) => [k, i]));
+  return Object.keys(hist.gws).map(Number).sort((a, b) => a - b).flatMap((gw) => {
+    const row = hist.gws[gw].find((r) => r[f.player_id] === p.player_id);
+    return row ? [{ gw, row, f }] : [];
+  });
+}
+
+// Zoom / pan: the view is the visible data window ({x0, x1, y0, y1}); null fits
+// every player. The chart is drawn in screen pixels at its real width, so dots,
+// names and axis numbers keep one size on any screen. Mouse: drag a box to zoom
+// in (or pan, with the pan tool), Ctrl/⌘ + scroll zooms, double-click resets.
+// Touch: one finger boxes or pans, two fingers pinch to zoom and move. A tap or
+// click on (or near) a dot opens that player's overview.
+const DRAG_MIN = { mouse: 4, pen: 6, touch: 10 }; // px of movement before a press counts as a drag, not a tap
+const TAP_REACH = 22;  // px: a tap picks the nearest dot this close
+const MAX_ZOOM = 40;   // deepest zoom: 1/40 of the full range on each axis
+const ZOOM_STEP = 1.6; // the − / + buttons
+const GLIDE_MS = 240;  // button, box and reset zooms glide this long
+const LABEL_PX = 11;   // name size (matches .vlabel)
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const KEYS = ["x0", "x1", "y0", "y1"];
+
+// Tick labels in the metric's own format, with more decimals once ticks are
+// closer together than it shows (so zoomed-in ticks don't all read "5.0").
+const decimals = (s) => (String(s).match(/\d+(?:\.(\d+))?/)?.[1] ?? "").length;
+function tickLabel(m, v, step) {
+  const s = m.fmt(v), dec = decimals(Number(step.toPrecision(3)));
+  return dec > decimals(s) ? s.replace(/\d+(?:\.\d+)?/, Math.abs(v).toFixed(dec)) : s;
+}
 
 function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
   const [hover, setHover] = useState(null);
-  const [view, setView] = useState(null);
+  const [sel, setSel] = useState(null); // the tapped player, shown in the overview card
+  const [showPath, setShowPath] = useState(false); // his route through the season, on the chart
+  const [names, setNames] = useState(true);
   const [tool, setTool] = useState("box");
-  const [drag, setDrag] = useState(null); // {sx, sy, ex, ey, start: view at press}
-  const svgRef = useRef(null);
-  const touches = useRef(new Map()); // pointerId -> [sx, sy], for two-finger pinch
-  useEffect(() => setView(null), [xk, yk]);
+  const [W, setW] = useState(760);
+  const wrapRef = useRef(null), svgRef = useRef(null);
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    setW(el.clientWidth || 760);
+    const ro = new ResizeObserver(() => setW(el.clientWidth || 760));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const small = W < 520;
+  const H = Math.round(clamp(W * 0.5, 300, 600));
+  const M = small ? { top: 12, right: 10, bottom: 40, left: 42 } : { top: 16, right: 16, bottom: 46, left: 56 };
+  const IW = W - M.left - M.right, IH = H - M.top - M.bottom;
+  const coarse = useMemo(() => window.matchMedia?.("(pointer: coarse)").matches, []);
 
   const xm = METRICS[xk], ym = METRICS[yk];
-  const xs = shown.map((p) => xm.get(p, recency)), ys = shown.map((p) => ym.get(p, recency));
+  const pts = useMemo(() => shown.map((p) => ({ p, x: xm.get(p, recency), y: ym.get(p, recency) })), [shown, xm, ym, recency]);
   // Prices start at £3.5m+, so that axis starts at the cheapest player's half-million.
-  // The top and right edges get a little room so the extreme dots aren't cut in half.
-  const x0 = xk === "price" && xs.length ? Math.floor(Math.min(...xs) * 2) / 2 : Math.min(0, ...xs);
-  const x1 = Math.max(1, ...xs), y0 = Math.min(0, ...ys), y1 = Math.max(1, ...ys);
-  const fit = { x0, x1: x1 + (x1 - x0) * 0.03, y0, y1: y1 + (y1 - y0) * 0.05 };
-  const d = view ?? fit;
-  const px = (v) => M.left + ((v - d.x0) / (d.x1 - d.x0 || 1)) * IW;
-  const py = (v) => M.top + IH - ((v - d.y0) / (d.y1 - d.y0 || 1)) * IH;
-  const ix = (sx) => d.x0 + ((sx - M.left) / IW) * (d.x1 - d.x0);
-  const iy = (sy) => d.y0 + ((M.top + IH - sy) / IH) * (d.y1 - d.y0);
-  const toSvg = (e) => {
-    const r = svgRef.current.getBoundingClientRect();
-    return [((e.clientX - r.left) * W) / r.width, ((e.clientY - r.top) * H) / r.height];
-  };
-  // Scale the window by f (< 1 zooms in) around the point under (sx, sy).
-  const zoomAt = (sx, sy, f) => {
-    const cx = ix(sx), cy = iy(sy);
-    setView({ x0: cx - (cx - d.x0) * f, x1: cx + (d.x1 - cx) * f, y0: cy - (cy - d.y0) * f, y1: cy + (d.y1 - cy) * f });
-  };
-  const zoomCentre = (f) => zoomAt(M.left + IW / 2, M.top + IH / 2, f);
+  // Every edge gets a little room so the extreme dots aren't cut in half.
+  const fit = useMemo(() => {
+    const xs = pts.map((r) => r.x), ys = pts.map((r) => r.y);
+    const x0 = xk === "price" && xs.length ? Math.floor(Math.min(...xs) * 2) / 2 : Math.min(0, ...xs);
+    const x1 = Math.max(1, ...xs), y0 = Math.min(0, ...ys), y1 = Math.max(1, ...ys);
+    const padX = (x1 - x0) * 0.03, padY = (y1 - y0) * 0.05;
+    return { x0: x0 - padX, x1: x1 + padX, y0: y0 - padY, y1: y1 + padY };
+  }, [pts, xk]);
 
-  // Pinch on a trackpad arrives as Ctrl + wheel; plain scrolling still scrolls the page.
+  // The window lives in a ref so fast gestures build on the latest one, not
+  // the last render's; the screen catches up once per animation frame.
+  const viewRef = useRef(null), boxRef = useRef(null), gesture = useRef(null), pointers = useRef(new Map());
+  const moving = useRef(false); // while a gesture or glide runs, the names stay put
+  const frame = useRef(0), glideFrame = useRef(0), settleTimer = useRef(0);
+  const [, repaint] = useReducer((n) => n + 1, 0);
+  const paint = () => { if (!frame.current) frame.current = requestAnimationFrame(() => { frame.current = 0; repaint(); }); };
+  const setView = (v) => { viewRef.current = v; paint(); };
+  const settle = () => { moving.current = false; paint(); };
+  useEffect(() => () => { cancelAnimationFrame(frame.current); cancelAnimationFrame(glideFrame.current); clearTimeout(settleTimer.current); }, []);
+  useEffect(() => { cancelAnimationFrame(glideFrame.current); setView(null); }, [xk, yk]);
+
+  const cur = () => viewRef.current ?? fit;
+  // Keep a window inside the data and between full view and MAX_ZOOM; all the way out is "fit" (null).
+  const limit = (v) => {
+    if (!v) return null;
+    const fx = fit.x1 - fit.x0, fy = fit.y1 - fit.y0;
+    const sx = clamp(v.x1 - v.x0, fx / MAX_ZOOM, fx), sy = clamp(v.y1 - v.y0, fy / MAX_ZOOM, fy);
+    if (sx > fx * 0.999 && sy > fy * 0.999) return null;
+    const cx = clamp((v.x0 + v.x1) / 2, fit.x0 + sx / 2, fit.x1 - sx / 2), cy = clamp((v.y0 + v.y1) / 2, fit.y0 + sy / 2, fit.y1 - sy / 2);
+    return { x0: cx - sx / 2, x1: cx + sx / 2, y0: cy - sy / 2, y1: cy + sy / 2 };
+  };
+  const dataAt = (v, sx, sy) => ({ x: v.x0 + ((sx - M.left) / IW) * (v.x1 - v.x0), y: v.y0 + ((M.top + IH - sy) / IH) * (v.y1 - v.y0) });
+  const zoomAt = (sx, sy, f, v = cur()) => {
+    const c = dataAt(v, sx, sy);
+    return limit({ x0: c.x - (c.x - v.x0) * f, x1: c.x + (v.x1 - c.x) * f, y0: c.y - (c.y - v.y0) * f, y1: c.y + (v.y1 - c.y) * f });
+  };
+  // Ease from the current window to `target` (null = fit).
+  const glide = (target) => {
+    cancelAnimationFrame(glideFrame.current);
+    const from = cur(), to = target ?? fit, t0 = performance.now();
+    moving.current = true;
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / GLIDE_MS), e = 1 - (1 - k) ** 3;
+      viewRef.current = k < 1 ? Object.fromEntries(KEYS.map((q) => [q, from[q] + (to[q] - from[q]) * e])) : target;
+      if (k < 1) glideFrame.current = requestAnimationFrame(step); else moving.current = false;
+      repaint();
+    };
+    glideFrame.current = requestAnimationFrame(step);
+  };
+
+  const local = (e) => {
+    const r = svgRef.current.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) * W) / r.width, y: ((e.clientY - r.top) * H) / r.height };
+  };
+  const d = cur();
+  const px = (v) => M.left + ((v - d.x0) / (d.x1 - d.x0)) * IW;
+  const py = (v) => M.top + IH - ((v - d.y0) / (d.y1 - d.y0)) * IH;
+  const inView = pts.filter((r) => r.x >= d.x0 && r.x <= d.x1 && r.y >= d.y0 && r.y <= d.y1);
+  // The dot nearest a screen point, if one is within reach (null if none).
+  const nearest = (pt) => {
+    let best = null, dist = TAP_REACH;
+    for (const r of inView) {
+      const g = Math.hypot(px(r.x) - pt.x, py(r.y) - pt.y);
+      if (g < dist) { best = r.p; dist = g; }
+    }
+    return best;
+  };
+
+  // Ctrl/⌘ + scroll (and trackpad pinch, which arrives as Ctrl + wheel) zooms at
+  // the cursor; plain scrolling still scrolls the page.
   useEffect(() => {
     const el = svgRef.current;
     const onWheel = (e) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
-      const [sx, sy] = toSvg(e);
-      zoomAt(sx, sy, Math.exp(e.deltaY * 0.01));
+      cancelAnimationFrame(glideFrame.current);
+      const pt = local(e);
+      moving.current = true;
+      setView(zoomAt(pt.x, pt.y, Math.exp(clamp(e.deltaY, -50, 50) * 0.01)));
+      clearTimeout(settleTimer.current);
+      settleTimer.current = setTimeout(settle, 160);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   });
 
   const onDown = (e) => {
-    if (e.button !== 0) return;
-    const p = toSvg(e);
-    touches.current.set(e.pointerId, p);
-    if (touches.current.size === 1) setDrag({ sx: p[0], sy: p[1], ex: p[0], ey: p[1], start: d });
-    else setDrag(null);
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    cancelAnimationFrame(glideFrame.current);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+    const pt = local(e);
+    pointers.current.set(e.pointerId, pt);
+    if (pointers.current.size === 1) {
+      gesture.current = { kind: "press", type: e.pointerType, start: pt, view: cur() };
+    } else if (pointers.current.size === 2) { // pinch: the point under the fingers stays under them
+      const [a, b] = [...pointers.current.values()], v = cur();
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      gesture.current = { kind: "pinch", view: v, at: dataAt(v, mid.x, mid.y), dist: Math.max(Math.hypot(a.x - b.x, a.y - b.y), 1) };
+      boxRef.current = null;
+      moving.current = true;
+      paint();
+    }
   };
   const onMove = (e) => {
-    const p = toSvg(e);
-    const pts = touches.current;
-    if (pts.size === 2 && pts.has(e.pointerId)) { // two fingers: zoom by the change in their distance
-      const [a, b] = [...pts.values()], before = Math.hypot(a[0] - b[0], a[1] - b[1]);
-      pts.set(e.pointerId, p);
-      const [c, g] = [...pts.values()], after = Math.hypot(c[0] - g[0], c[1] - g[1]);
-      if (before > 0 && after > 0) zoomAt((c[0] + g[0]) / 2, (c[1] + g[1]) / 2, before / after);
+    if (!pointers.current.has(e.pointerId)) return;
+    const pt = local(e);
+    pointers.current.set(e.pointerId, pt);
+    const g = gesture.current;
+    if (!g) return;
+    if (g.kind === "pinch") {
+      if (pointers.current.size < 2) return;
+      const [a, b] = [...pointers.current.values()];
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, f = g.dist / Math.max(Math.hypot(a.x - b.x, a.y - b.y), 1);
+      const sx = (g.view.x1 - g.view.x0) * f, sy = (g.view.y1 - g.view.y0) * f;
+      const x0 = g.at.x - ((mid.x - M.left) / IW) * sx, y0 = g.at.y - ((M.top + IH - mid.y) / IH) * sy;
+      setView(limit({ x0, x1: x0 + sx, y0, y1: y0 + sy }));
       return;
     }
-    if (!drag) return;
-    if (Math.hypot(p[0] - drag.sx, p[1] - drag.sy) > DRAG_MIN && !e.currentTarget.hasPointerCapture(e.pointerId))
-      e.currentTarget.setPointerCapture(e.pointerId);
-    setDrag({ ...drag, ex: p[0], ey: p[1] });
-    if (tool === "pan") {
-      const s = drag.start, dx = ((p[0] - drag.sx) / IW) * (s.x1 - s.x0), dy = ((p[1] - drag.sy) / IH) * (s.y1 - s.y0);
-      setView({ x0: s.x0 - dx, x1: s.x1 - dx, y0: s.y0 + dy, y1: s.y1 + dy });
+    if (g.kind === "press" && Math.hypot(pt.x - g.start.x, pt.y - g.start.y) > (DRAG_MIN[g.type] ?? 6)) {
+      g.kind = tool;
+      moving.current = true;
+    }
+    if (g.kind === "pan") {
+      const v = g.view, dx = ((pt.x - g.start.x) / IW) * (v.x1 - v.x0), dy = ((pt.y - g.start.y) / IH) * (v.y1 - v.y0);
+      setView(limit({ x0: v.x0 - dx, x1: v.x1 - dx, y0: v.y0 + dy, y1: v.y1 + dy }));
+    } else if (g.kind === "box") {
+      boxRef.current = { a: g.start, b: { x: clamp(pt.x, M.left, M.left + IW), y: clamp(pt.y, M.top, M.top + IH) } };
+      paint();
     }
   };
   const onUp = (e) => {
-    touches.current.delete(e.pointerId);
-    if (drag && tool === "box" && Math.abs(drag.ex - drag.sx) > DRAG_MIN && Math.abs(drag.ey - drag.sy) > DRAG_MIN) {
-      const [a, b] = [ix(drag.sx), ix(drag.ex)].sort((u, v) => u - v), [c, g] = [iy(drag.sy), iy(drag.ey)].sort((u, v) => u - v);
-      setView({ x0: a, x1: b, y0: c, y1: g });
-    }
-    setDrag(null);
+    if (!pointers.current.delete(e.pointerId)) return;
+    const g = gesture.current, box = boxRef.current;
+    boxRef.current = null;
+    if (g?.kind === "press" && e.type === "pointerup") setSel(nearest(local(e)));
+    if (g?.kind === "box" && box && Math.abs(box.a.x - box.b.x) > 8 && Math.abs(box.a.y - box.b.y) > 8) {
+      const v = cur(), lo = dataAt(v, Math.min(box.a.x, box.b.x), Math.max(box.a.y, box.b.y));
+      const hi = dataAt(v, Math.max(box.a.x, box.b.x), Math.min(box.a.y, box.b.y));
+      glide(limit({ x0: lo.x, x1: hi.x, y0: lo.y, y1: hi.y }));
+    } else if (!pointers.current.size) settle();
+    // A finger still down after a pinch waits to lift: no tap, no pan.
+    gesture.current = pointers.current.size ? { kind: "done" } : null;
+    paint();
   };
-  const boxing = drag && tool === "box" && Math.hypot(drag.ex - drag.sx, drag.ey - drag.sy) > DRAG_MIN;
-  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
   // With a curve on, that position's players far below it fade; those on it are named.
   const curveOf = Object.fromEntries(curves.map((c) => [c.pos, c]));
   const nearSet = new Set(curves.flatMap((c) => c.near.map((r) => r.p)));
   const faded = (p) => curveOf[p.position] && !nearSet.has(p);
-  const inView = shown.filter((p) => {
-    const x = xm.get(p, recency), y = ym.get(p, recency);
-    return x >= d.x0 && x <= d.x1 && y >= d.y0 && y <= d.y1;
-  });
   const named = new Set(curves.flatMap((c) => c.hull.map((q) => q.p)));
-  const labelled = inView.length <= LABEL_ALL ? inView.filter((p) => !named.has(p)) : [];
+
+  // Names that fit without overlapping: curve players always, then the tapped
+  // player, your squad and the highest on the y axis. Zooming in spreads the
+  // dots, so more fit. While the chart moves, the same names ride along with
+  // their dots and are re-placed once it stops (no flicker mid-gesture).
+  const labelled = useRef(new Set());
+  const gapX = 6, font = LABEL_PX;
+  const place = (r) => {
+    const cx = px(r.x), cy = py(r.y), w = r.p.player_name.length * font * 0.56;
+    const left = cx + gapX + w > M.left + IW; // runs off the right edge: name on the left
+    const x0 = left ? cx - gapX - w : cx + gapX;
+    return { r, x: left ? cx - gapX : cx + gapX, y: cy + font * 0.35, left, box: { x0, x1: x0 + w, y0: cy - font * 0.6, y1: cy + font * 0.6 } };
+  };
+  let labels;
+  if (moving.current) {
+    labels = inView.filter((r) => named.has(r.p) || (names && labelled.current.has(r.p))).map(place);
+  } else {
+    const rank = (p) => (p === sel ? 2 : placedIds.has(p.player_id) ? 1 : 0);
+    const order = [...inView.filter((r) => named.has(r.p)), ...(names ? inView.filter((r) => !named.has(r.p) && !faded(r.p))
+      .sort((a, b) => rank(b.p) - rank(a.p) || b.y - a.y) : [])];
+    labels = [];
+    for (const r of order) {
+      const l = place(r), b = l.box;
+      if (!named.has(r.p) && labels.some(({ box: o }) => b.x0 < o.x1 && b.x1 > o.x0 && b.y0 < o.y1 && b.y1 > o.y0)) continue;
+      labels.push(l);
+    }
+    labelled.current = new Set(labels.map((l) => l.r.p));
+  }
+
+  // The tapped player's season: deadline by deadline on these axes, ending at his dot today.
+  const hist = useSeasonHistory(!!sel);
+  const rows = useMemo(() => (sel ? seasonRows(hist, sel) : []), [hist, sel]);
+  const canPath = !!(PATH_METRICS[xk] && PATH_METRICS[yk]);
+  const path = showPath && canPath && rows.length ? [
+    ...rows.map(({ gw, row, f }) => ({ gw, x: PATH_METRICS[xk](row, f), y: PATH_METRICS[yk](row, f) })),
+    { gw: null, x: xm.get(sel, recency), y: ym.get(sel, recency) },
+  ] : null;
+
+  // Showing a path (or tapping someone else with paths on) glides to frame his whole route.
+  const pathKey = path && `${sel.player_id}-${xk}-${yk}`;
+  useEffect(() => {
+    if (!path) return;
+    const xs = path.map((q) => q.x), ys = path.map((q) => q.y);
+    const padX = Math.max((Math.max(...xs) - Math.min(...xs)) * 0.3, (fit.x1 - fit.x0) * 0.04);
+    const padY = Math.max((Math.max(...ys) - Math.min(...ys)) * 0.3, (fit.y1 - fit.y0) * 0.04);
+    glide(limit({ x0: Math.min(...xs) - padX, x1: Math.max(...xs) + padX, y0: Math.min(...ys) - padY, y1: Math.max(...ys) + padY }));
+  }, [pathKey]); // only when the route itself changes, not on every frame
+
+  const r0 = small ? 4 : 5;
+  const xt = ticks(d.x0, d.x1, small ? 4 : 7), yt = ticks(d.y0, d.y1, small ? 5 : 6);
+  const box = boxRef.current;
+  const help = coarse
+    ? `Tap a dot for details · ${tool === "box" ? "drag to zoom into an area" : "drag to move"} · pinch to zoom`
+    : `Click a dot for details · ${tool === "box" ? "drag a box to zoom in" : "drag to move"} · Ctrl/⌘ + scroll to zoom · double-click to reset`;
 
   return (
-    <div className="chart-wrap">
+    <div className="chart-wrap" ref={wrapRef}>
       <div className="chart-tools">
         <Segmented value={tool} onChange={setTool}
           options={[{ value: "box", label: "⬚ Zoom to area" }, { value: "pan", label: "✥ Pan" }]} />
-        <div className="chart-zoom">
-          <button type="button" className="btn sm" onClick={() => zoomCentre(ZOOM_STEP)} aria-label="Zoom out">−</button>
-          <button type="button" className="btn sm" onClick={() => zoomCentre(1 / ZOOM_STEP)} aria-label="Zoom in">+</button>
-          <button type="button" className="btn sm ghost" onClick={() => setView(null)} disabled={!view}>Reset</button>
+        <div className="ct-zoom" role="group" aria-label="Zoom">
+          <button type="button" className="btn sm" onClick={() => glide(zoomAt(M.left + IW / 2, M.top + IH / 2, ZOOM_STEP))}
+            disabled={!viewRef.current} aria-label="Zoom out">−</button>
+          <button type="button" className="btn sm" onClick={() => glide(zoomAt(M.left + IW / 2, M.top + IH / 2, 1 / ZOOM_STEP))} aria-label="Zoom in">+</button>
+          <button type="button" className="btn sm ghost" onClick={() => glide(null)} disabled={!viewRef.current}>Reset</button>
         </div>
-        <small className="chart-help">{tool === "box" ? "Drag a box around players to zoom in" : "Drag to move around"} · pinch or
-          {" "}Ctrl/⌘ + scroll to zoom · double-click to reset · {inView.length} in view</small>
+        <button type="button" className={`chip ct-names ${names ? "on" : ""}`} aria-pressed={names} onClick={() => setNames((v) => !v)}>Names</button>
       </div>
-      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className={`chart tool-${tool} ${drag && tool === "pan" ? "panning" : ""}`}
+      <svg ref={svgRef} width={W} height={H} viewBox={`0 0 ${W} ${H}`}
+        className={`chart tool-${tool} ${gesture.current?.kind === "pan" ? "panning" : ""} ${path ? "tracing" : ""}`}
         role="img" aria-label={`${ym.label} against ${xm.label}`}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
-        onDoubleClick={(e) => { if (!e.target.classList.contains("dot")) setView(null); }}>
+        onDoubleClick={(e) => { if (!nearest(local(e))) glide(null); }}>
         <defs><clipPath id="plot-area"><rect x={M.left} y={M.top} width={IW} height={IH} /></clipPath></defs>
-        {ticks(d.y0, d.y1).map((t) => (
+        {yt.map((t) => (
           <g key={`y${t}`}>
             <line x1={M.left} x2={W - M.right} y1={py(t)} y2={py(t)} className="grid" />
-            <text x={M.left - 8} y={py(t)} className="tick" textAnchor="end" dominantBaseline="middle">{ym.fmt(t)}</text>
+            <text x={M.left - 8} y={py(t)} className="tick" textAnchor="end" dominantBaseline="middle">{tickLabel(ym, t, yt[1] - yt[0] || 1)}</text>
           </g>
         ))}
-        {ticks(d.x0, d.x1).map((t) => (
+        {xt.map((t) => (
           <g key={`x${t}`}>
             <line x1={px(t)} x2={px(t)} y1={M.top} y2={H - M.bottom} className="grid" />
-            <text x={px(t)} y={H - M.bottom + 18} className="tick" textAnchor="middle">{xm.fmt(t)}</text>
+            <text x={px(t)} y={H - M.bottom + 18} className="tick" textAnchor="middle">{tickLabel(xm, t, xt[1] - xt[0] || 1)}</text>
           </g>
         ))}
         <text x={M.left + IW / 2} y={H - 6} className="axis-title" textAnchor="middle">{xm.label}</text>
-        <text x={-(M.top + IH / 2)} y={15} className="axis-title" textAnchor="middle" transform="rotate(-90)">{ym.label}</text>
+        <text x={-(M.top + IH / 2)} y={13} className="axis-title" textAnchor="middle" transform="rotate(-90)">{ym.label}</text>
         <g clipPath="url(#plot-area)">
         {curves.map((c) => {
           const first = c.hull[0], cheapest = Math.max(fit.x0, Math.min(...c.near.map((r) => r.x), first.x));
@@ -216,33 +401,42 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
             </g>
           );
         })}
-        {shown.map((p) => (
-          <circle key={p.player_id} cx={px(xm.get(p, recency))} cy={py(ym.get(p, recency))}
-            r={placedIds.has(p.player_id) ? 6.5 : 4.5} fill={POS_COLOR[p.position]}
-            className={`dot ${placedIds.has(p.player_id) ? "picked" : ""} ${hover?.p === p ? "hot" : ""} ${faded(p) ? "faded" : ""}`}
-            onMouseEnter={(e) => setHover({ p, x: e.clientX, y: e.clientY })}
-            onMouseMove={(e) => setHover({ p, x: e.clientX, y: e.clientY })}
-            onMouseLeave={() => setHover(null)}
-            onClick={() => onPick(p)} />
+        {inView.map(({ p, x, y }) => (
+          <circle key={p.player_id} cx={px(x)} cy={py(y)}
+            r={placedIds.has(p.player_id) ? r0 + 2 : r0} fill={POS_COLOR[p.position]}
+            className={`dot ${placedIds.has(p.player_id) ? "picked" : ""} ${hover?.p === p || sel === p ? "hot" : ""} ${faded(p) ? "faded" : ""}`}
+            onPointerMove={(e) => e.pointerType === "mouse" && !gesture.current?.kind?.match(/pan|box/) && setHover({ p, x: e.clientX, y: e.clientY })}
+            onPointerLeave={() => setHover(null)} />
         ))}
-        {curves.flatMap((c) => c.hull.map((q) => (
-          <text key={q.p.player_id} x={px(q.x) + 7} y={py(q.y) - 7} className="vlabel">{q.p.player_name}</text>
-        )))}
-        {labelled.map((p) => (
-          <text key={p.player_id} x={px(xm.get(p, recency)) + 7} y={py(ym.get(p, recency)) + 4} className="vlabel small">{p.player_name}</text>
+        {path && (
+          <g className="spath" style={{ "--pos": POS_COLOR[sel.position] }}>
+            <polyline points={path.map((q) => `${px(q.x)},${py(q.y)}`).join(" ")} />
+            {path.slice(0, -1).map((q, i) => (
+              <g key={q.gw}>
+                <circle cx={px(q.x)} cy={py(q.y)} r={i ? 3 : 4.5} />
+                <text x={px(q.x)} y={py(q.y) - 9} textAnchor="middle">{i ? q.gw : `GW${q.gw}`}</text>
+              </g>
+            ))}
+          </g>
+        )}
+        {labels.map(({ r, x, y, left }) => (
+          <text key={r.p.player_id} x={x} y={y} textAnchor={left ? "end" : "start"}
+            className={`vlabel ${named.has(r.p) ? "" : "small"}`}>{r.p.player_name}</text>
         ))}
         </g>
-        {boxing && (() => {
-          const x0 = clamp(Math.min(drag.sx, drag.ex), M.left, M.left + IW), x1 = clamp(Math.max(drag.sx, drag.ex), M.left, M.left + IW);
-          const y0 = clamp(Math.min(drag.sy, drag.ey), M.top, M.top + IH), y1 = clamp(Math.max(drag.sy, drag.ey), M.top, M.top + IH);
-          return <rect className="zoom-box" x={x0} y={y0} width={x1 - x0} height={y1 - y0} />;
-        })()}
+        {box && <rect className="zoom-box" x={Math.min(box.a.x, box.b.x)} y={Math.min(box.a.y, box.b.y)}
+          width={Math.abs(box.a.x - box.b.x)} height={Math.abs(box.a.y - box.b.y)} />}
       </svg>
       <div className="legend">
         {POSITIONS.map((p) => <span key={p}><i style={{ background: POS_COLOR[p] }} />{p}</span>)}
-        <span className="legend-note">Click a dot to add or remove from your squad</span>
+        <span className="legend-note">{inView.length} of {pts.length} in view</span>
       </div>
-      {hover && (
+      <small className="chart-help">{help}</small>
+      {sel && <DotCard p={sel} recency={recency} picked={placedIds.has(sel.player_id)} onPick={onPick}
+        gap={curveOf[sel.position]?.gap({ x: sel.price, y: ym.get(sel, recency) })} rows={rows}
+        path={{ on: showPath, ok: canPath, toggle: () => setShowPath((v) => !v) }}
+        onClose={() => setSel(null)} />}
+      {hover && hover.p !== sel && (
         <div className="scatter-tip" style={{ left: hover.x + 14, top: hover.y + 14 }}>
           <Shirt teamId={hover.p.team_id} gk={hover.p.position === "GK"} size={30} />
           <div>
@@ -261,6 +455,58 @@ function Scatter({ shown, xk, yk, recency, placedIds, onPick, curves }) {
   );
 }
 
+// A tapped dot's player at a glance: projection, minutes, fixtures, and the
+// button to add or drop him. It floats over the page (bottom corner; a sheet on
+// phones), rendered on <body> because the animated cards would pin it inside them.
+function DotCard({ p, recency, picked, onPick, gap, rows, path, onClose }) {
+  const stats = [
+    ["Next GW", `${adjPoints(p, recency).toFixed(1)} pts`],
+    ["Per GW, next 3", `${adjPoints(p, recency, true).toFixed(1)} pts`],
+    ["Plays next", `${Math.round((p.start_prob ?? 0) * 100)}%`],
+    ["Owned by", `${(p.selected_by_percent ?? 0).toFixed(1)}%`],
+  ];
+  return createPortal(
+    <div className="dot-card card" style={{ "--pos": POS_COLOR[p.position] }} role="dialog" aria-label={p.player_name}>
+      <div className="dc-head">
+        <Shirt teamId={p.team_id} gk={p.position === "GK"} size={40} />
+        <div><b>{p.player_name}</b><small>{p.team} · {POS_NAME[p.position]} · £{p.price.toFixed(1)}m</small></div>
+        <button type="button" className="dc-close" onClick={onClose} aria-label="Close">✕</button>
+      </div>
+      {p.status !== "a" && p.news && <div className={`pd-news ${p.status === "d" ? "doubt" : "out"}`}>{p.news}</div>}
+      <dl className="dc-stats">{stats.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+      <div className="dc-fx"><span>Next 5</span><NextFixtures teamId={p.team_id} n={5} /></div>
+      <Season p={p} rows={rows} path={path} />
+      <div className="dc-foot">
+        {gap != null && <small className={gap < 0.05 ? "on" : ""}>{gap < 0.05 ? "On the value curve" : `${gap.toFixed(1)} pts below the value curve`}</small>}
+        <button type="button" className={`btn sm ${picked ? "ghost" : "primary"}`} onClick={() => onPick(p)}>
+          {picked ? "Remove from squad" : "Add to squad"}</button>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// How the player has moved since the season began: price since GW1, and the
+// model's expected points from the first saved deadline to now, plus the
+// toggle that draws that route on the chart.
+function Season({ p, rows, path }) {
+  const start = Math.round((p.price - (p.cost_change_start ?? 0)) * 10) / 10, rise = p.price - start;
+  const r1 = (v) => Math.round(v * 10) / 10; // changes from the rounded figures, so they add up on screen
+  const first = rows[0], xpThen = first && r1(PATH_METRICS.points(first.row, first.f)), xpNow = r1(adjPoints(p, 0));
+  const move = (d, unit) => (Math.abs(d) < 0.05 ? <em>no change</em>
+    : <em className={d > 0 ? "up" : "down"}>{d > 0 ? "+" : "−"}{unit}{Math.abs(d).toFixed(1)}</em>);
+  return (
+    <div className="dc-season">
+      <div><span>Price</span><b>£{start.toFixed(1)}m → £{p.price.toFixed(1)}m</b>{move(rise, "£")}<small>since GW1</small></div>
+      {first && <div><span>Expected pts</span><b>{xpThen.toFixed(1)} → {xpNow.toFixed(1)}</b>{move(xpNow - xpThen, "")}<small>since GW{first.gw}</small></div>}
+      <button type="button" className={`chip ${path.on && path.ok ? "on" : ""}`} aria-pressed={path.on} disabled={!path.ok || !rows.length}
+        title={path.ok ? "Draw his route through the season on the chart" : "Set the axes to price, expected points or chance of playing"}
+        onClick={path.toggle}>Season path</button>
+      {!path.ok && <small className="dc-note">Season path works with price, expected points and chance of playing on the axes.</small>}
+    </div>
+  );
+}
+
 // The players on or near each toggled curve, closest first, with what else
 // makes them worth a look: minutes, set pieces, and how few managers own them.
 function ValuePicks({ curves, ym, placedIds, onPick, fairShare }) {
@@ -268,9 +514,7 @@ function ValuePicks({ curves, ym, placedIds, onPick, fairShare }) {
   if (!curves.length) return null;
   return (
     <div className="value-picks">
-      <p className="hint">On the curve: the most points for the price. Nobody cheaper scores more, and paying more buys
-        fewer points per extra £m. The shaded band is the model's margin of error (±{curves[0].margin.toFixed(1)} pts):
-        players inside it are as good value as the curve, as far as the projections can tell.</p>
+      <p className="hint">On the curve: the most points for the price. Shaded: within the margin of error (±{curves[0].margin.toFixed(1)} pts). <More to="value">More</More></p>
       {curves.map((c) => {
         const rows = open.has(c.pos) ? c.near : c.near.slice(0, VALUE_LIST);
         return (

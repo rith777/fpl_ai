@@ -63,7 +63,10 @@ infra/deploy.sh site      # build and publish the app
 ```
 
 Set the printed role ARN as the GitHub repository variable `AWS_ROLE_ARN`;
-`.github/workflows/refresh.yml` then re-scores players every 6 hours. The export
+`.github/workflows/refresh.yml` then re-scores players every 6 hours, and
+`.github/workflows/retrain.yml` refits the models every Tuesday on every match
+played so far (`python main.py retrain`; held out, refitting during the season
+ranked players better in every season tested). The export
 refuses to publish if its checks fail (missing projections, unknown clubs, a
 past deadline, or a club's whole side moving further since the last export
 than any club has between two deadlines this season: news moves players one at
@@ -118,14 +121,22 @@ python main.py all         # download, features, train, export, history, backtes
   against expected points (from the best points-per-£m player up), with the
   model's margin of error as a band. It lists the players on or near it,
   closest first, with minutes, set pieces and ownership.
+- Transfers shows the model's plan next to the best plan for each number of
+  moves, up to your free transfers plus one (a −4 hit).
 - My Team has two modes, Pick team and Transfers. Transfers judges any moves you plan (swap players in the app):
   what they add per gameweek from now, Good / Average / Bad against the best
   plan for the same free transfers (by the model's margin of error), and each
-  move's reasons: the projections, FPL's scoring rules, set-piece duties
-  (FPL's current lists), selling a player most managers own, the crowd's
-  transfers this week and injury flags. Its Chips card says when to play each
+  move's case as two columns, For and Against: the projections, recent games
+  (expected points per appearance, not FPL's form), last season's points,
+  FPL's scoring rules, the money (against the best player the sale alone pays
+  for), set-piece duties (FPL's current lists), ownership, likely price moves
+  this week, matches missed lately and injury flags. Its Chips card says when to play each
   chip, lists blank and double gameweeks for your squad, and checks what a
   Wildcard would add now.
+- New to FPL (`#/start`): how to join, how points work, chips and the ideas the app
+  uses, in plain words, with rule numbers from FPL's own settings.
+- Pages keep explanations short and link to the About page (`#/about/<section>`),
+  which holds who built it, how it works and how to read each page.
 - History ends with the model's report card: for each finished gameweek, how
   well the deadline projections ranked the likely starters by what they scored
   (rank correlation), next to points per gameweek so far and FPL's own expected

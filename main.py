@@ -36,14 +36,15 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from data.collectors import FPLApiClient, HistoricalDataCollector  # noqa: E402
 from data.processors import FPLDataProcessor, club_names, load_odds, match_odds  # noqa: E402
 from features.engineering import (  # noqa: E402
-    CONCEDED_PER_POINT, LONG_PLAY_MINUTES, ODDS_FEATURES, STRENGTH, FeatureEngineer, add_context, per_k, team_strength,
+    CONCEDED_PER_POINT, LONG_PLAY_MINUTES, ODDS_FEATURES, STRENGTH, FeatureEngineer, add_context, expected_match_points, per_k,
+    team_strength,
 )
 from models.optimizer import pick_squad  # noqa: E402
 from models.predictors import FPLPredictor  # noqa: E402
 from models.trainer import ModelTrainer, _fit_pair  # noqa: E402
 from utils.config import (  # noqa: E402
     CURRENT_SEASON, DATA_PROCESSED_PATH, DATA_RAW_PATH, BACKTEST_STARTS, HORIZON, HORIZON_CHOICES, MIN_GAIN_CHOICES, MODELS_PATH,
-    OUTPUTS_PATH, SQUAD_BUDGET, SQUAD_SIZE, TRAINING_SEASONS,
+    OUTPUTS_PATH, ROLLING_WINDOW, SQUAD_BUDGET, SQUAD_SIZE, TRAINING_SEASONS,
 )
 
 FEATURES_FILE = DATA_PROCESSED_PATH / "dataset_with_features.csv"
@@ -80,12 +81,28 @@ def cmd_train(_):
     if not FEATURES_FILE.exists():
         print("No feature dataset found. Run: python main.py features")
         return
-    trainer = ModelTrainer()
-    trainer.train(pd.read_csv(FEATURES_FILE))
-    trainer.save(MODELS_PATH)
+    _train_live()
     _fit_price_model()
     for path in (PRESEASON_PATH, BACKTEST_PATH):  # refitted on the next `history` / `backtest`
         shutil.rmtree(path, ignore_errors=True)
+
+
+def _train_live():
+    trainer = ModelTrainer()
+    trainer.train(pd.read_csv(FEATURES_FILE))
+    trainer.save(MODELS_PATH)
+
+
+def cmd_retrain(args):
+    """Refit the live models on every match played so far, this season's
+    included. Held out, refitting every 4 gameweeks ranked players better in
+    every season tested (2024-25 +0.0015, 2025-26 +0.0039, 2026-27 so far
+    +0.0002; +0.0026 ± 0.0009 over 19 four-week windows). Pre-season and
+    backtest models are fitted on past seasons only, so they stay. Run weekly
+    by .github/workflows/retrain.yml."""
+    cmd_download(args)
+    cmd_features(args)
+    _train_live()
 
 
 PRICE_MODEL = MODELS_PATH / "price_model.joblib"
@@ -266,6 +283,7 @@ def _score_players(players: pd.DataFrame, api, predictor, refresh: bool = True) 
                                       if pid in by_gw.index else [0.0] * len(gws))
     scoring = api.scoring()
     df = _display_stats(df, latest, strength, scoring, rows, first_gw)
+    df = _track_record(df, feats, scoring)
     df = _rules_breakdown(df, rows, feats, strength, scoring, first_gw, len(gws))
     df["projected_points"] = df["xp_next"].round(2)
     df["value"] = (df["xp_h"] / df["price"].clip(lower=0.1)).round(3)
@@ -303,6 +321,28 @@ def _display_stats(df, latest, strength, scoring, rows, first_gw):
     thr = pos.map(DEFCON_THRESHOLD)
     p_hit = poisson.sf(thr.fillna(10 ** 6).to_numpy() - 1, df["defcon_per_90"].fillna(0).to_numpy())
     df["defcon_xp"] = np.where(thr.isna(), 0.0, pos.map(scoring["defensive_contribution"]).fillna(0) * p_hit).round(2)
+    return df
+
+
+def _track_record(df, feats, scoring):
+    """More context for a move's case (not inputs to the projection): expected
+    points per appearance over his last ROLLING_WINDOW appearances (from xG, so
+    less luck than FPL's form, which also counts a missed match as 0), the
+    gameweeks of his club's last ROLLING_WINDOW matches he missed, and last
+    season's Premier League points (none: he wasn't in the league)."""
+    f = feats.assign(xpoints=expected_match_points(feats, scoring))
+    played = f[f["minutes"] > 0].groupby("player_id").tail(ROLLING_WINDOW)
+    df["recent_xp"] = df["player_id"].map(played.groupby("player_id")["xpoints"].mean()).round(2)
+    last = f.groupby("player_id").tail(ROLLING_WINDOW)
+    missed = last[last["minutes"] == 0].groupby("player_id")["gameweek"].agg(lambda s: sorted({int(g) for g in s}))
+    df["missed_gws"] = df["player_id"].map(missed).apply(lambda v: v if isinstance(v, list) else [])
+    # players_raw.csv is a snapshot from early in that season: total its gameweeks instead.
+    prev = DATA_RAW_PATH / TRAINING_SEASONS[-1]
+    if not (prev / "players_raw.csv").exists():  # the scheduled refresh starts without raw data
+        HistoricalDataCollector().download_season(TRAINING_SEASONS[-1], DATA_RAW_PATH)
+    pts = pd.read_csv(prev / "merged_gw.csv", usecols=["element", "total_points"]).groupby("element")["total_points"].sum()
+    ids = pd.read_csv(prev / "players_raw.csv", usecols=["id", "code"]).set_index("code")["id"]
+    df["last_season_pts"] = df["code"].map(ids).map(pts)
     return df
 
 
@@ -541,7 +581,7 @@ EXPORT_COLUMNS = [
     "points_per_game", "selected_by_percent", "xgi_per_90",
     "xg_per_90", "xa_per_90", "on_pens", "on_fks", "on_corners", "status", "news", "cost_change_start",
     "goals_scored", "assists", "clean_sheets", "bonus", "net_transfers", "price_change", "rise_chance", "fall_chance",
-    "xp_gw", "rules_next", "rules_h",
+    "xp_gw", "rules_next", "rules_h", "recent_xp", "missed_gws", "last_season_pts",
 ]
 
 
@@ -816,6 +856,20 @@ def _season_fixtures(feats):
     return fixtures, names
 
 
+# A break: this many days or more without a league match (an international
+# window, a winter break or a cup weekend; a normal round gap is under a week).
+BREAK_DAYS = 9
+
+
+def _breaks(feats):
+    """Gameweeks that come after a break: the first round played once BREAK_DAYS
+    pass without any league kickoff (robust to single matches moved later)."""
+    t = feats["kickoff_time"].drop_duplicates().sort_values()
+    ends = t[t.diff() >= pd.Timedelta(days=BREAK_DAYS)]
+    first = feats.groupby("gameweek")["kickoff_time"].median()
+    return [int(first[first >= e].index.min()) for e in ends]
+
+
 def cmd_backtest(_):
     """Strategy backtest on past seasons: for each season after the first, the
     models refitted on the seasons before it project every gameweek from the
@@ -856,7 +910,7 @@ def cmd_backtest(_):
         seasons[season] = {
             "players": {int(r.player_id): [r.player_name, r.position, r.team] for r in meta.itertuples()},
             "gws": gws, "actual": {gw: _actual(feats, gw) for gw in range(2, last_gw + 1)},
-            "starts": starts,
+            "starts": starts, "breaks": _breaks(feats),
         }
         print(f"   {season}: GW2-{last_gw} projected, {len(starts)} starting squads")
     BACKTEST_STARTS_FILE.write_text(json.dumps({s: v["starts"] for s, v in seasons.items()}), encoding="utf-8")
@@ -903,6 +957,7 @@ def main():
     sub.add_parser("download", help="historical seasons + this season's per-fixture history")
     sub.add_parser("features", help="build the modelling dataset")
     sub.add_parser("train", help="train, validate and calibrate the models")
+    sub.add_parser("retrain", help="refresh the data and refit the live models (weekly, in CI)")
 
     players_p = sub.add_parser("players", help="list all players per position with stats")
     players_p.add_argument("--top", type=int, default=20, help="rows shown per position (0 = all)")
@@ -927,6 +982,7 @@ def main():
         "download": cmd_download,
         "features": cmd_features,
         "train": cmd_train,
+        "retrain": cmd_retrain,
         "players": cmd_players,
         "dashboard": cmd_dashboard,
         "export": cmd_export,
