@@ -114,22 +114,30 @@ export default function Plan({
   const rows = useMemo(() => {
     if (squad.length !== 15) return [];
     const { locked } = userPlanOptions();
+    const band = sigmaGain();
     const selling = Object.fromEntries(planMoves.map((m) => [m.out.player_id, m]));
-    const after = squad.map((p) => selling[p.player_id]?.in ?? p);
-    const left = bank - planMoves.reduce((t, m) => t + m.cost, 0);
+    // Everyone else is judged in the squad the firm moves leave: the manager's own
+    // sales and clear upgrades, not optional swaps inside the margin of error.
+    const firm = plan.filter((it) => it.moves.some((m) => plans[m.out.player_id]) || it.gain >= band * it.moves.length)
+      .flatMap((it) => it.moves);
+    const after = squad.map((p) => firm.find((m) => m.out === p)?.in ?? p);
+    const left = bank - firm.reduce((t, m) => t + m.cost, 0);
     const upgrades = Object.fromEntries(bestMoves({ squad: after, players, bank: left, priceOf, recency, locked })
       .map((m) => [m.moves[0].out.player_id, { in: m.moves[0].in, gain: m.gain }]));
     const xi = bestXI(after, (p) => expectedPoints(p, recency));
-    const band = sigmaGain();
     return squad.filter((p) => runs[p.team_id]).map((p) => {
       const mine = plans[p.player_id];
       const sale = selling[p.player_id];
       if (sale) {
-        return { p, o: {
-          tone: mine ? "bad" : "warn", label: mine ? "Selling (your plan)" : "Sell this week", due: nextGw,
-          why: mine ? "your plan" : "model's move",
-          text: `→ ${sale.in.player_name} (£${sale.in.price.toFixed(1)}m), in this week's moves above.`,
-        } };
+        const to = `→ ${sale.in.player_name} (£${sale.in.price.toFixed(1)}m)`;
+        if (mine) return { p, o: { tone: "bad", label: "Selling (your plan)", due: nextGw, why: "your plan", text: `${to}, in this week's moves above.` } };
+        // The model's own move: worth flagging only if it adds more than its margin of error.
+        const item = plan.find((it) => it.moves.includes(sale));
+        const clear = item && item.gain >= band * item.moves.length;
+        return { p, o: clear
+          ? { tone: "warn", label: "Sell this week", due: nextGw, why: "clear upgrade", text: `${to}: +${item.gain.toFixed(1)} pts/GW, beyond the margin of error.` }
+          : { tone: "neutral", label: "Optional swap", why: "optional",
+            text: `${to} adds only +${(item?.gain ?? 0).toFixed(1)} pts/GW${item?.moves.length > 1 ? " with its paired move" : ""}, inside the margin of error (±${band.toFixed(1)}): keeping him is as good.` } };
       }
       if (userPlanOptions().mustSell.has(p.player_id)) {
         return { p, o: {
@@ -190,6 +198,9 @@ export default function Plan({
             </li>
           </ul>
         ) : <p className="plan-note">{freeTransfers ? "No move worth a transfer: roll it." : "No free transfers left this week (moves already planned on Transfers)."}</p>}
+        {planMoves.length > 0 && !planMoves.some((m) => plans[m.out.player_id]) && planGainShown < sigmaGain() && (
+          <p className="plan-note">Small gain, inside the model's margin of error (±{sigmaGain().toFixed(1)} pts/GW): rolling the transfers is as good. Turn on <b>Patient</b> on Transfers to only see moves the model is sure of.</p>
+        )}
         {unsold.length > 0 && (
           <p className="plan-note warn-note">
             Not sold this week: {unsold.map((p) => p.player_name).join(", ")}. {freeTransfers ? "There aren't enough free transfers for every sale you marked" : "No free transfers are left"}; a sale
