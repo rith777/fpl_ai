@@ -9,6 +9,7 @@ import PlayerList from "./components/PlayerList.jsx";
 import Summary from "./components/Summary.jsx";
 import Stats from "./components/Stats.jsx";
 import Fixtures from "./components/Fixtures.jsx";
+import Plan from "./components/Plan.jsx";
 import History from "./components/History.jsx";
 import Strategy from "./components/Strategy.jsx";
 import TransfersPanel from "./components/TransfersPanel.jsx";
@@ -17,7 +18,7 @@ import About from "./components/About.jsx";
 import Start from "./components/Start.jsx";
 import { Beta, Segmented, TeamsContext } from "./components/ui.jsx";
 import { fetchTeam, fetchPending, savePending, saveSquad, saveLineup, withPending, loadRecentTeams, saveRecentTeams } from "./fpl.js";
-import { configureModel, lineupCheck, lineupPoints } from "./transfers.js";
+import { configureModel, lineupCheck, lineupPoints, setPatient } from "./transfers.js";
 
 // Would adding `pos` to the current starters keep a legal XI reachable?
 function canStart(starters, pos) {
@@ -38,7 +39,7 @@ function xiProblem(xi) {
 }
 
 const FOOTER = [
-  ["Plan", [["This week", "#/home"], ["My Team", "#/team"], ["Statistics", "#/stats"], ["Fixtures", "#/fixtures"]]],
+  ["Plan", [["This week", "#/home"], ["My Team", "#/team"], ["Statistics", "#/stats"], ["Fixtures", "#/fixtures"], ["Squad plan", "#/plan"]]],
   ["Review", [["History", "#/history"], ["Strategy", "#/strategy"]]],
   ["Learn", [["New to FPL", "#/start"], ["About", "#/about"], ["GitHub", "https://github.com/rith777/fpl_ai"]]],
 ];
@@ -76,6 +77,13 @@ export default function App() {
   const [team, setTeam] = useState(null);           // loaded real FPL team (see fpl.js)
   const [teamLoading, setTeamLoading] = useState(false);
   const [freeTransfers, setFreeTransfers] = useState(1);
+  // Patient transfers: the manager's choice, remembered in this browser.
+  const [patient, setPatientState] = useState(() => { try { return localStorage.getItem("fplPatient") === "1"; } catch { return false; } });
+  setPatient(patient);
+  const choosePatient = (on) => {
+    setPatientState(on);
+    try { localStorage.setItem("fplPatient", on ? "1" : "0"); } catch { /* private mode: this visit only */ }
+  };
   const [recentTeams, setRecentTeams] = useState(loadRecentTeams); // for the team-ID dropdown
   const [listPos, setListPos] = useState("ALL");
   const autoLoaded = useRef(false);
@@ -455,6 +463,7 @@ export default function App() {
     transfers: ["My Team", gwLine],
     stats: ["Statistics", `${players.length} players · projections weighted ${recencyLabel(recency).toLowerCase()}`],
     fixtures: ["Fixtures", `Gameweeks ${nextGw}+ · ${clubs.teams.length} clubs`],
+    plan: ["Squad plan", "How long to hold each player, and when your transfers fall due"],
     history: ["History", team ? `${team.name} · each move graded on what was known at the time` : "Your season, week by week"],
     strategy: ["Strategy", team ? `${team.name}'s moves vs the model's, scored on real points` : "What past seasons say works"],
     start: ["New to FPL", "How the game works, in plain words, and how to join"],
@@ -478,7 +487,7 @@ export default function App() {
     page = <ThisWeek clubs={clubs} team={team} loading={teamLoading} onLoad={loadTeam} savedTeamId={savedTeamId}
       recent={recent} players={players} squad={squad} nextGw={nextGw} total={total} captain={captain} vice={vice}
       lineup={lineup} onBestXI={applyBestXI} bank={budget - spent} priceOf={priceOf} recency={recency}
-      freeTransfers={freeTransfers} made={transfersMade} onApply={applyTransfers} />;
+      freeTransfers={freeTransfers} made={transfersMade} onApply={applyTransfers} patient={patient} />;
   } else if (route === "transfers") {
     page = (
       <div className="squad-layout wide-side">
@@ -488,7 +497,7 @@ export default function App() {
             onUndoPending={undoPending} onCommit={commitTransfers}
             squad={squad} players={players}
             bank={budget - spent} priceOf={priceOf} recency={recency}
-            freeTransfers={freeTransfers} setFreeTransfers={setFreeTransfers}
+            freeTransfers={freeTransfers} setFreeTransfers={setFreeTransfers} patient={patient} setPatient={choosePatient}
             made={transfersMade} onApply={applyTransfers}
             placedIds={placedIds} onPick={togglePick} listPos={listPos} setListPos={setListPos} />
         </aside>
@@ -498,6 +507,8 @@ export default function App() {
     page = <Stats players={players} recency={recency} placedIds={placedIds} onPick={togglePick} />;
   } else if (route === "fixtures") {
     page = <Fixtures currentGw={clubs.current_gw} squad={squad} />;
+  } else if (route === "plan") {
+    page = <Plan squad={squad} nextGw={nextGw} deadlines={clubs.deadlines} teamId={team?.id} />;
   } else if (route === "history") {
     page = <History team={team} players={players} />;
   } else if (route === "strategy") {

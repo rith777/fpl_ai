@@ -2,7 +2,7 @@ import React, { useContext, useDeferredValue, useEffect, useMemo, useState } fro
 import { POS_COLOR, POS_NAME, POSITIONS, fairShareOwnership } from "../lib.js";
 import {
   HIT_COST, chipValues, horizon, model, moveVerdict, planCase, planGain as gainOf, planOptions, positionStats, rollCheck,
-  sigmaGain, squadGain, transferPlan, upgradeTargets,
+  sigmaGain, squadGain, transferPlan, upgradeTargets, userKeep,
 } from "../transfers.js";
 import { CHIP_NAMES, chipsLeft } from "../rules.js";
 import { TIMED_CHIPS, chooseChip } from "../strategy.js";
@@ -339,10 +339,30 @@ function RollCheck({ roll, moves }) {
   return <p className={`roll-check ${cls}`}><b>{label}:</b> {why}. <a href="#/about/transfers">Why?</a></p>;
 }
 
+// The manager's choice between spending a free transfer on any gain that
+// shows, and charging it what a banked transfer was worth on past seasons.
+function PatientToggle({ patient, setPatient }) {
+  const bank = model().strategy?.bank;
+  if (!bank || !setPatient) return null;
+  const worth = bank.value.slice(2, 4).map((v) => v.toFixed(1)).join(" / ");
+  return (
+    <div className="patient">
+      <Segmented value={patient ? "patient" : "use"} onChange={(v) => setPatient(v === "patient")}
+        options={[{ value: "use", label: "Use on any gain" }, { value: "patient", label: "Patient" }]} />
+      <p className="hint">
+        {patient
+          ? `A transfer is only used when the move beats saving it. On past seasons a saved 2nd / 3rd free transfer was worth about ${worth} pts.`
+          : "Every free transfer goes on the best move that adds points, however small."}
+        {" "}On past seasons neither way clearly won (<a href="#/about/transfers">why</a>).
+      </p>
+    </div>
+  );
+}
+
 export default function TransfersPanel({
   team, loading, onLoad, savedTeamId, recent, onUndoPending, onCommit,
   squad, players, bank, priceOf, recency, freeTransfers, setFreeTransfers, made, onApply,
-  placedIds, onPick, listPos, setListPos,
+  placedIds, onPick, listPos, setListPos, patient, setPatient,
 }) {
   const [tab, setTab] = useState("plan");
   const nameOf = useMemo(() => Object.fromEntries(players.map((p) => [p.player_id, p.player_name])), [players]);
@@ -352,8 +372,8 @@ export default function TransfersPanel({
   const ftLeft = Math.max(0, freeTransfers - made);
   const hits = Math.max(0, made - freeTransfers) * HIT_COST;
   const plan = useMemo(
-    () => (ready && tab === "plan" ? transferPlan({ squad, players, bank, priceOf, recency: r, freeTransfers: ftLeft }) : []),
-    [ready, tab, squad, players, bank, priceOf, r, ftLeft]);
+    () => (ready && tab === "plan" ? transferPlan({ squad, players, bank, priceOf, recency: r, freeTransfers: ftLeft, keep: userKeep() }) : []),
+    [ready, tab, squad, players, bank, priceOf, r, ftLeft, patient]);
   const targets = useMemo(
     () => (ready && tab === "upgrades" ? upgradeTargets({ squad, players, bank, priceOf, recency: r }) : null),
     [ready, tab, squad, players, bank, priceOf, r]);
@@ -407,6 +427,7 @@ export default function TransfersPanel({
                 ✓ Save {made} move{made > 1 ? "s" : ""} as made on FPL
               </button>
             )}
+            <PatientToggle patient={patient} setPatient={setPatient} />
             <p className="hint">
               {team.pending.length ? "Free transfers are saved with your moves." : "Free transfers are estimated from your history."}
               {" "}Adjust them if they're off.
@@ -418,6 +439,7 @@ export default function TransfersPanel({
             <p className="hint">Load your FPL team to use its real bank, selling prices and free transfers.
               Without it, suggestions use the squad you've built here.</p>
             <TeamLoader initialId={savedTeamId} loading={loading} onLoad={onLoad} recent={recent} />
+            <PatientToggle patient={patient} setPatient={setPatient} />
           </>
         )}
       </section>

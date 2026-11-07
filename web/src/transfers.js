@@ -20,6 +20,14 @@ export function configureModel(info) {
   if (info) MODEL = { ...MODEL, ...info };
 }
 export const horizon = () => MODEL.horizon;
+// "Patient" (the manager's choice): charge every free transfer this week what
+// banking it was worth on past seasons (strategy.json's bank, scripts/bank.mjs),
+// even where that rule didn't clear the backtest's bar to become the default.
+let PATIENT = false;
+export const setPatient = (on) => { PATIENT = !!on; };
+export const isPatient = () => PATIENT;
+// What a banked transfer is worth for this week's plans.
+export const userKeep = () => (PATIENT ? MODEL.strategy?.bank ?? MODEL.strategy?.keep : MODEL.strategy?.keep);
 export const model = () => MODEL;
 // Each projection carries the model's error (sigma_mean, measured out of sample);
 // a difference between two players carries sqrt(2) of it. Gaps smaller than

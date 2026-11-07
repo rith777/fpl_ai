@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { POS_COLOR, adjPoints } from "../lib.js";
 import { CHIP_NAMES, chipsLeft } from "../rules.js";
-import { HIT_COST, horizon, model, rollCheck, transferPlan } from "../transfers.js";
+import { HIT_COST, horizon, model, rollCheck, transferPlan, userKeep } from "../transfers.js";
 import { chipCall, tagFor } from "./TransfersPanel.jsx";
 import { TeamLoader } from "./Header.jsx";
 import League from "./League.jsx";
@@ -56,10 +56,10 @@ function Status({ clubs, nextGw, total, now, team, ftLeft, bank }) {
 const Heading = ({ children }) => <h2 className="tw-section">{children}</h2>;
 
 // The best transfer(s) with the free transfers left, or the call to roll.
-function Transfer({ squad, players, bank, priceOf, recency, freeTransfers, made, onApply }) {
+function Transfer({ squad, players, bank, priceOf, recency, freeTransfers, made, onApply, patient }) {
   const ftLeft = Math.max(0, freeTransfers - made);
-  const plan = useMemo(() => transferPlan({ squad, players, bank, priceOf, recency, freeTransfers: ftLeft }),
-    [squad, players, bank, priceOf, recency, ftLeft]);
+  const plan = useMemo(() => transferPlan({ squad, players, bank, priceOf, recency, freeTransfers: ftLeft, keep: userKeep() }),
+    [squad, players, bank, priceOf, recency, ftLeft, patient]);
   const roll = rollCheck({ plan, freeTransfers: ftLeft, squad });
   const moves = plan.flatMap((it) => it.moves);
   const gain = plan.reduce((t, it) => t + it.gain - (it.hits * HIT_COST) / horizon(), 0);
