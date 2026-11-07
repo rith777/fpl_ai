@@ -47,3 +47,14 @@ def test_a_whole_club_moving_at_once_stops_the_export(tmp_path, monkeypatch):
     broken = news.assign(start_prob=[0.6, 0.6, 0.9, 0.9])  # club X's whole side drops
     assert [p.split("'")[0] for p in main._drift_problems(broken, {"current_gw": 3})] == ["X"]
     assert main._drift_problems(broken, {"current_gw": 5}) == []  # too old to compare
+
+
+def test_odds_download_creates_season_folder(tmp_path, monkeypatch):
+    """A fresh CI runner has no data/raw/<season>/ yet (the weekly retrain
+    failed on exactly this): saving the odds must create it."""
+    from data.collectors import HistoricalDataCollector
+
+    match = pd.DataFrame({"Div": ["E0"], "Date": ["01/11/2026"], "HomeTeam": ["A"], "AwayTeam": ["B"]})
+    monkeypatch.setattr(pd, "read_csv", lambda *a, **k: match)
+    assert HistoricalDataCollector.download_odds("2022-23", tmp_path) == 1
+    assert (tmp_path / "2022-23" / "odds.csv").exists()

@@ -48,7 +48,9 @@ class HistoricalDataCollector:
             nxt = pd.read_csv(f"{ODDS_BASE}/fixtures.csv", encoding="utf-8-sig")
             frames.append(nxt[nxt["Div"] == "E0"])
         odds = pd.concat(frames).drop_duplicates(["Date", "HomeTeam", "AwayTeam"])
-        odds.to_csv(Path(raw_path) / season / "odds.csv", index=False)
+        dest_dir = Path(raw_path) / season
+        dest_dir.mkdir(parents=True, exist_ok=True)  # fresh runners have no season folders yet
+        odds.to_csv(dest_dir / "odds.csv", index=False)
         return len(odds)
 
     def download_all(self, seasons, raw_path: Path) -> list:
