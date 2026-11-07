@@ -234,6 +234,13 @@ export default function App() {
     } catch (e) { flash(e.message); }
   }
 
+  // Back to the squad as loaded from FPL (drops moves tried here, not saved ones).
+  function resetToTeam() {
+    if (!team) return;
+    setStarters(team.picks.filter((p) => p.starter).map((p) => p.id));
+    setBench(team.picks.filter((p) => !p.starter).map((p) => p.id));
+    setCaptainId(null);
+  }
   async function undoPending() {
     try { await savePending(team.id, null); await loadTeam(team.id); }
     catch (e) { flash(e.message); }
@@ -376,9 +383,13 @@ export default function App() {
       if (xi.length >= 11) break;
       if (posCounts(xi)[p.position] < XI_BOUNDS[p.position][1]) xi.push(p);
     }
-    const xiIds = xi.map((p) => p.player_id);
+    // Then the lineup the "Best XI" check would pick (this gameweek, autosubs
+    // and bench order counted), so a fresh squad never shows a better XI.
+    const rough = s.filter((p) => !xi.includes(p));
+    const best = s.length === SQUAD_SIZE && xi.length === 11 ? lineupCheck(s, xi, rough, recency) : null;
+    const xiIds = (best ? s.filter((p) => best.xi.has(p)) : xi).map((p) => p.player_id);
     setStarters(xiIds);
-    setBench(s.filter((p) => !xiIds.includes(p.player_id)).map((p) => p.player_id));
+    setBench((best ? best.bench : rough).map((p) => p.player_id));
     setAutoIds(new Set(s.filter((p) => !kept.includes(p)).map((p) => p.player_id)));
     setAutoRecency(recency);
   }
@@ -509,7 +520,7 @@ export default function App() {
             onUndoPending={undoPending} onCommit={commitTransfers}
             squad={squad} players={players}
             bank={budget - spent} priceOf={priceOf} recency={recency}
-            freeTransfers={freeTransfers} setFreeTransfers={setFreeTransfers} patient={patient} setPatient={choosePatient} userPlan={plans}
+            freeTransfers={freeTransfers} setFreeTransfers={setFreeTransfers} patient={patient} setPatient={choosePatient} userPlan={plans} onReset={resetToTeam}
             made={transfersMade} onApply={applyTransfers}
             placedIds={placedIds} onPick={togglePick} listPos={listPos} setListPos={setListPos} />
         </aside>

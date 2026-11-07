@@ -50,7 +50,7 @@ export default function Summary({ total, captain, spent, budget, starters, bench
 
       <div className="widget">
         <span className="w-label">{team ? "Money remaining" : "Budget"}</span>
-        <span className={`w-mid ${over ? "bad" : ""}`}>£{left.toFixed(1)}m</span>
+        <span className={`w-mid ${over ? "bad" : ""}`}>£{(Math.abs(left) < 0.05 ? 0 : left).toFixed(1)}m</span>
         <div className="meter" title={`£${spent.toFixed(1)}m of £${budget.toFixed(1)}m`}>
           <div className={`meter-fill ${over ? "over" : ""}`} style={{ width: `${Math.min(100, (spent / budget) * 100)}%` }} />
         </div>
