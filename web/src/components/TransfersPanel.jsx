@@ -361,7 +361,7 @@ function PatientToggle({ patient, setPatient }) {
 export default function TransfersPanel({
   team, loading, onLoad, savedTeamId, recent, onUndoPending, onCommit,
   squad, players, bank, priceOf, recency, freeTransfers, setFreeTransfers, made, onApply,
-  placedIds, onPick, listPos, setListPos, patient, setPatient,
+  placedIds, onPick, listPos, setListPos, patient, setPatient, userPlan,
 }) {
   const [tab, setTab] = useState("plan");
   const nameOf = useMemo(() => Object.fromEntries(players.map((p) => [p.player_id, p.player_name])), [players]);
@@ -372,17 +372,17 @@ export default function TransfersPanel({
   const hits = Math.max(0, made - freeTransfers) * HIT_COST;
   const plan = useMemo(
     () => (ready && tab === "plan" ? transferPlan({ squad, players, bank, priceOf, recency: r, freeTransfers: ftLeft, ...userPlanOptions() }) : []),
-    [ready, tab, squad, players, bank, priceOf, r, ftLeft, patient]);
+    [ready, tab, squad, players, bank, priceOf, r, ftLeft, patient, userPlan]);
   const targets = useMemo(
-    () => (ready && tab === "upgrades" ? upgradeTargets({ squad, players, bank, priceOf, recency: r }) : null),
-    [ready, tab, squad, players, bank, priceOf, r]);
+    () => (ready && tab === "upgrades" ? upgradeTargets({ squad, players, bank, priceOf, recency: r, locked: userPlanOptions().locked }) : null),
+    [ready, tab, squad, players, bank, priceOf, r, userPlan]);
   const roll = useMemo(
     () => rollCheck({ plan, freeTransfers: ftLeft, squad }), [plan, ftLeft, squad]);
   // Side by side with the model's pick: the best plan for each number of
   // moves, up to one past the free transfers (a −4 hit), in case you want it.
   const options = useMemo(
-    () => (ready && tab === "plan" ? planOptions({ squad, players, bank, priceOf, recency: r, freeTransfers: ftLeft, upTo: ftLeft + 1 }) : []),
-    [ready, tab, squad, players, bank, priceOf, r, ftLeft]);
+    () => (ready && tab === "plan" ? planOptions({ squad, players, bank, priceOf, recency: r, freeTransfers: ftLeft, upTo: ftLeft + 1, locked: userPlanOptions().locked, mustSell: userPlanOptions().mustSell }) : []),
+    [ready, tab, squad, players, bank, priceOf, r, ftLeft, userPlan]);
   const [size, setSize] = useState(null); // moves in the plan shown; null: the model's pick
   useEffect(() => setSize(null), [ftLeft]);
   const count = (items) => items.reduce((t, it) => t + it.moves.length, 0);
@@ -443,9 +443,6 @@ export default function TransfersPanel({
         )}
       </section>
 
-      {team && <Chips squad={squad} used={team.chipsUsed} nextGw={team.gw + 1} players={players} bank={bank}
-        priceOf={priceOf} recency={r} freeTransfers={ftLeft} />}
-
       <Segmented value={tab} onChange={setTab} className="full"
         options={[{ value: "plan", label: "Plan" }, { value: "upgrades", label: "Upgrades" }, { value: "players", label: "Players" }]} />
 
@@ -494,9 +491,15 @@ export default function TransfersPanel({
             <p className="plan-foot">≈ {signed(gainOf(shown))} pts/GW{shown.some((it) => it.hits) ? " after hits" : ""} · £{bankAfter.toFixed(1)}m left</p>
           )}
           {roll && view === pick && <RollCheck roll={roll} moves={plan.flatMap((it) => it.moves).length} />}
+          {Object.keys(userPlan ?? {}).length > 0 && (
+            <p className="hint">Following your <a href="#/plan">Squad plan</a>: held players aren't sold, and players marked to sell go first.</p>
+          )}
         </section>
         </>
       )}
+
+      {team && <Chips squad={squad} used={team.chipsUsed} nextGw={team.gw + 1} players={players} bank={bank}
+        priceOf={priceOf} recency={r} freeTransfers={ftLeft} />}
     </div>
   );
 }

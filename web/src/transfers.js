@@ -31,9 +31,23 @@ export const userKeep = () => (PATIENT ? MODEL.strategy?.bank ?? MODEL.strategy?
 // This week's planner settings for the manager's choice. Patient also asks each
 // transfer to clear the model's margin of error (sigmaGain: a gain smaller than
 // that may be noise), except a sale of a player ruled out, which is never noise.
-export const userPlanOptions = () => (PATIENT
-  ? { keep: userKeep(), minGain: sigmaGain(), sellUnavailable: true }
-  : { keep: userKeep() });
+export const userPlanOptions = () => ({
+  ...(PATIENT ? { keep: userKeep(), minGain: sigmaGain(), sellUnavailable: true } : { keep: userKeep() }),
+  locked: USER_PLAN.locked, mustSell: USER_PLAN.mustSell,
+});
+// The manager's own plan per player (Squad plan page): who to hold (never sold
+// this week) and who to sell this week (no bar to clear, like a player ruled out).
+let USER_PLAN = { locked: new Set(), mustSell: new Set() };
+export function setUserPlan(plans = {}, nextGw = 0) {
+  const locked = new Set(), mustSell = new Set();
+  for (const [id, v] of Object.entries(plans)) {
+    const gw = v === "now" ? nextGw : v?.startsWith?.("gw") ? +v.slice(2) : null;
+    if (v === "keep" || (gw && gw > nextGw)) locked.add(+id);
+    else if (gw && gw <= nextGw) mustSell.add(+id);
+  }
+  USER_PLAN = { locked, mustSell };
+}
+const isLocked = (ctx, p) => !!ctx.locked?.has(p.player_id);
 // Ruled out (injured, suspended, unavailable or left the club); a doubt still may play.
 export const unavailable = (p) => !!p.status && p.status !== "a" && p.status !== "d";
 export const model = () => MODEL;
@@ -189,12 +203,13 @@ const byBetter = (a, b) => (better(a, b) ? -1 : better(b, a) ? 1 : 0);
 
 // Best like-for-like replacement for each squad player (same position,
 // affordable from their selling price + bank, club limit kept).
-export function bestMoves({ squad, players, bank, priceOf, recency }) {
+export function bestMoves({ squad, players, bank, priceOf, recency, locked, mustSell }) {
   const score = scorer(recency);
   const base = squadValue(squad, score);
   const ownedIds = new Set(squad.map((p) => p.player_id));
   const items = [];
   for (const out of squad) {
+    if (locked?.has(out.player_id)) continue;
     const funds = priceOf(out) + bank;
     const others = squad.filter((p) => p !== out);
     let best = null;
@@ -205,7 +220,8 @@ export function bestMoves({ squad, players, bank, priceOf, recency }) {
       const m = { ...evaluate(squad, [out], [c], score, base), moves: [{ out, in: c, cost }] };
       if (better(m, best)) best = m;
     }
-    if (best && best.gain > 0) items.push(best);
+    // A sale the manager has decided on is offered even when it loses points.
+    if (best && (best.gain > 0 || mustSell?.has(out.player_id))) items.push(best);
   }
   return items.sort(byBetter);
 }
@@ -217,7 +233,7 @@ export function bestMoves({ squad, players, bank, priceOf, recency }) {
 // model can't tell apart (within its error) are settled by: affordable beats
 // not; between affordable ones, sell the weaker player (keep your assets);
 // otherwise the one closer to affordable. The runner-up is offered as `alt`.
-export function upgradeTargets({ squad, players, bank, priceOf, recency }) {
+export function upgradeTargets({ squad, players, bank, priceOf, recency, locked }) {
   const score = scorer(recency);
   const band = sigmaGain();
   const base = squadValue(squad, score);
@@ -233,6 +249,7 @@ export function upgradeTargets({ squad, players, bank, priceOf, recency }) {
     if (ownedIds.has(c.player_id) || score(c) <= 0) continue;
     const sales = [];
     for (const o of squad) {
+      if (locked?.has(o.player_id)) continue;
       if (o.position !== c.position || !clubsFit(squad.filter((p) => p !== o), [c])) continue;
       const m = evaluate(squad, [o], [c], score, base);
       const cost = c.price - priceOf(o);
@@ -261,7 +278,7 @@ function frontier(players, ownedIds, score, pos) {
 
 // Best two-transfer combination, priced jointly so one sale can fund the other.
 // `linked` marks pairs that only work together (one buy isn't affordable alone).
-function bestPair({ squad, players, bank, priceOf, recency }) {
+function bestPair({ squad, players, bank, priceOf, recency, locked }) {
   const score = scorer(recency);
   const base = squadValue(squad, score);
   const ownedIds = new Set(squad.map((p) => p.player_id));
@@ -270,6 +287,7 @@ function bestPair({ squad, players, bank, priceOf, recency }) {
   for (let i = 0; i < squad.length; i++) {
     for (let j = i + 1; j < squad.length; j++) {
       const [o1, o2] = [squad[i], squad[j]];
+      if (locked?.has(o1.player_id) || locked?.has(o2.player_id)) continue;
       const funds = priceOf(o1) + priceOf(o2) + bank;
       const others = squad.filter((p) => p !== o1 && p !== o2);
       for (const c1 of fronts[o1.position]) {
@@ -335,17 +353,22 @@ const planBankCost = (ctx, items) => {
 
 // The bar a move must clear: `minGain`, unless (with `sellUnavailable`) every
 // player it sells is ruled out.
-const barFor = (ctx, m) => (ctx.sellUnavailable && m.moves.every((x) => unavailable(x.out)) ? 0 : ctx.minGain ?? 0);
+const decided = (ctx, m) => m.moves.every((x) => ctx.mustSell?.has(x.out.player_id));
+const barFor = (ctx, m) => (m.moves.every((x) => ctx.mustSell?.has(x.out.player_id) || (ctx.sellUnavailable && unavailable(x.out)))
+  ? 0 : ctx.minGain ?? 0);
 
 function greedy(ctx, squad, bank, used) {
   const items = [];
   while (used + items.length < squad.length) {
-    const [m] = bestMoves({ ...ctx, squad, bank });
-    if (!m) break;
+    const moves = bestMoves({ ...ctx, squad, bank });
     const hits = used + items.length >= ctx.freeTransfers ? 1 : 0;
+    // Sales the manager has decided on go first, with a free transfer.
+    const m = (!hits && moves.find((x) => decided(ctx, x))) || moves.find((x) => !decided(ctx, x) || x.gain > 0);
+    if (!m) break;
     if (hits && ctx.noHits) break;
     const min = barFor(ctx, m);
-    if (hits ? (m.gain - min) * horizon() - HIT_COST <= 0 : shown(m.gain - min - bankCost(ctx, used + items.length)) <= 0) break;
+    if (!(decided(ctx, m) && !hits)
+      && (hits ? (m.gain - min) * horizon() - HIT_COST <= 0 : shown(m.gain - min - bankCost(ctx, used + items.length)) <= 0)) break;
     items.push({ ...m, hits });
     squad = applyMoves(squad, m.moves);
     bank -= spend(m.moves);
@@ -376,18 +399,24 @@ const planCost = (items) => items.reduce((t, it) => t + spend(it.moves), 0);
 // null values every transfer at nothing kept.
 export function transferPlan({
   squad, players, bank, priceOf, recency, freeTransfers, minGain = 0, noHits = false, keep = MODEL.strategy?.keep,
-  sellUnavailable = false,
+  sellUnavailable = false, locked = null, mustSell = null,
 }) {
-  const ctx = { squad, players, priceOf, recency, freeTransfers, minGain, noHits, keep, sellUnavailable };
+  // A player the manager has decided to sell isn't bought back.
+  if (mustSell?.size) players = players.filter((p) => !mustSell.has(p.player_id));
+  const ctx = { squad, players, priceOf, recency, freeTransfers, minGain, noHits, keep, sellUnavailable, locked, mustSell };
   const plain = greedy(ctx, squad, bank, 0);
   const hits = Math.max(0, 2 - freeTransfers);
-  const pair = !(hits && noHits) && bestPair({ squad, players, bank, priceOf, recency });
+  const pair = !(hits && noHits) && bestPair({ squad, players, bank, priceOf, recency, locked });
   if (!pair) return plain;
   const opened = [{ ...pair, hits }, ...greedy(ctx, applyMoves(squad, pair.moves), bank - spend(pair.moves), 2)];
   // Plans compared net of the banked transfers they use up.
   const net = (items) => planGain(items) - planBankCost(ctx, items);
-  const better = sameGain(net(opened), net(plain)) ? planCost(opened) < planCost(plain) : net(opened) > net(plain);
-  const plan = net(opened.slice(0, 1)) > 2 * barFor(ctx, pair) && better ? opened : plain;
+  // A plan that drops a sale the manager decided on loses to one that makes it.
+  const decidedIds = squad.filter((p) => mustSell?.has(p.player_id)).map((p) => p.player_id);
+  const covers = (items) => decidedIds.filter((id) => items.some((it) => it.moves.some((m) => m.out.player_id === id))).length;
+  const better = covers(opened) !== covers(plain) ? covers(opened) > covers(plain)
+    : sameGain(net(opened), net(plain)) ? planCost(opened) < planCost(plain) : net(opened) > net(plain);
+  const plan = (covers(opened) > covers(plain) || net(opened.slice(0, 1)) > 2 * barFor(ctx, pair)) && better ? opened : plain;
   return freeTransfers >= squad.length ? rebuilt(ctx, plan, bank) : plan;
 }
 
@@ -396,12 +425,15 @@ export function transferPlan({
 // single moves one at a time, or opening with the best pair priced jointly,
 // whichever adds more net of hits (the cheaper on a tie). A plan stops short
 // when no further move adds points.
-export function planOptions({ squad, players, bank, priceOf, recency, freeTransfers, upTo }) {
-  const ctx = { players, priceOf, recency };
+export function planOptions({ squad, players, bank, priceOf, recency, freeTransfers, upTo, locked = null, mustSell = null }) {
+  if (mustSell?.size) players = players.filter((p) => !mustSell.has(p.player_id));
+  const ctx = { players, priceOf, recency, locked, mustSell };
   const chain = (items, sq, b) => {
     while (items.reduce((t, it) => t + it.moves.length, 0) < upTo) {
-      const [m] = bestMoves({ ...ctx, squad: sq, bank: b });
-      if (!m || shown(m.gain) <= 0) break;
+      // The manager's decided sales first, then the best move while it adds points.
+      const moves = bestMoves({ ...ctx, squad: sq, bank: b });
+      const m = moves.find((x) => decided(ctx, x)) ?? moves.find((x) => !decided(ctx, x));
+      if (!m || (!decided(ctx, m) && shown(m.gain) <= 0)) break;
       items.push(m);
       sq = applyMoves(sq, m.moves);
       b -= spend(m.moves);
@@ -409,7 +441,8 @@ export function planOptions({ squad, players, bank, priceOf, recency, freeTransf
     return items;
   };
   const singles = chain([], squad, bank);
-  const pair = upTo >= 2 && bestPair({ ...ctx, squad, bank });
+  // A pair can't put the decided sales first, so it sits out when there are any.
+  const pair = upTo >= 2 && !squad.some((p) => mustSell?.has(p.player_id)) && bestPair({ ...ctx, squad, bank });
   const paired = pair ? chain([pair], applyMoves(squad, pair.moves), bank - spend(pair.moves)) : [];
   const withHits = (items) => {
     let used = 0;

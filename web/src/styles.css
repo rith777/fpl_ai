@@ -1121,3 +1121,18 @@ h1 .beta { font-size: 11px; margin-left: 10px; }
 .plan-tag.bad { background: rgba(255, 23, 81, 0.16); color: var(--red); }
 .patient { margin: 10px 0 4px; }
 .patient .hint { margin: 6px 0 0; }
+.floating.dd-floating { width: auto; min-width: 200px; background: none; border: 0; box-shadow: none; }
+.floating.dd-floating .dd-menu { position: static; min-width: 200px; }
+.plan-moves { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.plan-moves li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.04); font-size: 14px; animation: fadeUp 0.25s both; }
+.plan-moves .arrow { color: var(--muted); }
+.plan-moves small { color: var(--muted); margin-left: auto; }
+.plan-moves .plan-total { background: none; color: var(--green); font-weight: 700; padding-top: 2px; }
+/* Transfers side panel flows with the page: plan cards are long, and an inner scroll cut them off. */
+@media (min-width: 1181px) {
+  .wide-side .side { position: static; max-height: none; overflow: visible; }
+}
+/* Squad plan: the player stays in view while the table scrolls sideways. */
+.plan-table th:first-child, .plan-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--panel); }
+.plan-table tbody tr:hover td:first-child { background: var(--panel-2); }
+@media (max-width: 640px) { .plan-table .plan-name small { white-space: nowrap; } .plan-table td:first-child { box-shadow: 6px 0 8px -6px rgba(0, 0, 0, 0.6); } }
