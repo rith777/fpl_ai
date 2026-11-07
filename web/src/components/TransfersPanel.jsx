@@ -361,7 +361,7 @@ function PatientToggle({ patient, setPatient }) {
 export default function TransfersPanel({
   team, loading, onLoad, savedTeamId, recent, onUndoPending, onCommit,
   squad, players, bank, priceOf, recency, freeTransfers, setFreeTransfers, made, onApply,
-  placedIds, onPick, listPos, setListPos, patient, setPatient, userPlan,
+  placedIds, onPick, listPos, setListPos, patient, setPatient, userPlan, onReset,
 }) {
   const [tab, setTab] = useState("plan");
   const nameOf = useMemo(() => Object.fromEntries(players.map((p) => [p.player_id, p.player_name])), [players]);
@@ -419,6 +419,11 @@ export default function TransfersPanel({
                 ✓ Saved GW{team.gw + 1} moves: {team.pending.map((t) => `${nameOf[t.out] ?? t.out} → ${nameOf[t.in] ?? t.in}`).join(", ")}
                 {" "}<button className="link" onClick={onUndoPending} title="Clears every saved move for this gameweek">Undo all</button>
               </p>
+            )}
+            {made > 0 && onReset && (
+              <button className="btn ghost block" onClick={onReset} title="Back to your squad as loaded from FPL">
+                ↺ Undo {made} planned move{made > 1 ? "s" : ""}
+              </button>
             )}
             {made > 0 && (
               <button className="btn primary block" onClick={onCommit}

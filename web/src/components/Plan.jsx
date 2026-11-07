@@ -96,6 +96,8 @@ export default function Plan({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [squad, players, bank, priceOf, recency, freeTransfers, plans, patient]);
   const planMoves = plan.flatMap((it) => it.moves);
+  // Sales the manager marked for this week that the moves couldn't fit.
+  const unsold = squad.filter((p) => userPlanOptions().mustSell.has(p.player_id) && !planMoves.some((m) => m.out.player_id === p.player_id));
   const planHits = plan.reduce((t, it) => t + it.hits, 0);
   const planGainShown = plan.reduce((t, it) => t + it.gain, 0) - (planHits * HIT_COST) / horizon();
 
@@ -105,28 +107,52 @@ export default function Plan({
     return a && b && (new Date(b) - new Date(a)) / 864e5 >= BREAK_DAYS;
   }), [gws, deadlines]);
 
-  // The model's view: each player's best like-for-like replacement, and who starts.
+  // The model's view, after this week's moves (with the manager's plan): who is
+  // being sold and for whom, who is held, and for everyone else the best swap
+  // and whether he starts in the squad those moves leave, with the money they
+  // leave. So holding or selling one player changes what the rest are told.
   const rows = useMemo(() => {
     if (squad.length !== 15) return [];
-    const upgrades = Object.fromEntries(bestMoves({ squad, players, bank, priceOf, recency })
+    const { locked } = userPlanOptions();
+    const selling = Object.fromEntries(planMoves.map((m) => [m.out.player_id, m]));
+    const after = squad.map((p) => selling[p.player_id]?.in ?? p);
+    const left = bank - planMoves.reduce((t, m) => t + m.cost, 0);
+    const upgrades = Object.fromEntries(bestMoves({ squad: after, players, bank: left, priceOf, recency, locked })
       .map((m) => [m.moves[0].out.player_id, { in: m.moves[0].in, gain: m.gain }]));
-    const xi = bestXI(squad, (p) => expectedPoints(p, recency));
+    const xi = bestXI(after, (p) => expectedPoints(p, recency));
     const band = sigmaGain();
-    return squad.filter((p) => runs[p.team_id]).map((p) => ({
-      p, o: verdict(p, { upgrade: upgrades[p.player_id], inXI: xi.has(p), turn: fixtureTurn(runs[p.team_id], windows), nextGw, last, band }),
-    }));
-  }, [squad, players, bank, priceOf, recency, runs, windows, nextGw, last]);
+    return squad.filter((p) => runs[p.team_id]).map((p) => {
+      const mine = plans[p.player_id];
+      const sale = selling[p.player_id];
+      if (sale) {
+        return { p, o: {
+          tone: mine ? "bad" : "warn", label: mine ? "Selling (your plan)" : "Sell this week", due: nextGw,
+          why: mine ? "your plan" : "model's move",
+          text: `→ ${sale.in.player_name} (£${sale.in.price.toFixed(1)}m), in this week's moves above.`,
+        } };
+      }
+      if (userPlanOptions().mustSell.has(p.player_id)) {
+        return { p, o: {
+          tone: "warn", label: "To sell: no free transfer", due: nextGw, why: "your plan, not fitted",
+          text: "You marked him to sell this week, but the free transfers went on the other sales. See the note above.",
+        } };
+      }
+      const o = verdict(p, { upgrade: upgrades[p.player_id], inXI: xi.has(p), turn: fixtureTurn(runs[p.team_id], windows), nextGw, last, band });
+      if (locked.has(p.player_id)) {
+        const until = mine?.startsWith("gw") ? ` to GW${+mine.slice(2) - 1}` : "";
+        return { p, o: { ...o, tone: "good", label: `Holding${until} (your plan)`, due: mine?.startsWith("gw") ? +mine.slice(2) : null, why: "your plan" } };
+      }
+      return { p, o };
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [squad, players, bank, priceOf, recency, runs, windows, nextGw, last, plan, plans]);
 
   // When each planned or suggested move falls due, so transfers can be timed.
   const timeline = useMemo(() => {
     const due = {};
-    for (const { p, o } of rows) {
-      const mine = plans[p.player_id];
-      const gw = mine === "now" ? nextGw : mine?.startsWith("gw") ? +mine.slice(2) : mine === "keep" ? null : o.due;
-      if (gw) (due[gw] ??= []).push({ p, why: mine && mine !== "keep" ? "your plan" : o.why });
-    }
+    for (const { p, o } of rows) if (o.due) (due[o.due] ??= []).push({ p, why: o.why });
     return Object.entries(due).map(([gw, list]) => ({ gw: +gw, list })).sort((a, b) => a.gw - b.gw);
-  }, [rows, plans, nextGw]);
+  }, [rows]);
 
   if (squad.length !== 15) {
     return <section className="card empty-card"><p>Pick or load a full squad of 15 to plan how long to hold each player.</p></section>;
@@ -159,11 +185,17 @@ export default function Plan({
               </li>
             ))}
             <li className="plan-total">
-              {planGainShown >= 0 ? "+" : ""}{planGainShown.toFixed(1)} pts/GW over the next {horizon()} GWs
+              {Math.round(planGainShown * 10) >= 0 ? "+" : "−"}{Math.abs(planGainShown).toFixed(1)} pts/GW over the next {horizon()} GWs
               {planHits ? ` after a −${planHits * HIT_COST} hit` : ""}
             </li>
           </ul>
-        ) : <p className="plan-note">No move worth a transfer: roll it.</p>}
+        ) : <p className="plan-note">{freeTransfers ? "No move worth a transfer: roll it." : "No free transfers left this week (moves already planned on Transfers)."}</p>}
+        {unsold.length > 0 && (
+          <p className="plan-note warn-note">
+            Not sold this week: {unsold.map((p) => p.player_name).join(", ")}. {freeTransfers ? "There aren't enough free transfers for every sale you marked" : "No free transfers are left"}; a sale
+            you decided on never takes a −4 hit on its own. Add one on <a href="#/transfers">Transfers</a> if you want it, or move it to a later week.
+          </p>
+        )}
       </section>
 
       <section className="card plan-summary">

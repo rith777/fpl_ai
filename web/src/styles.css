@@ -1136,3 +1136,5 @@ h1 .beta { font-size: 11px; margin-left: 10px; }
 .plan-table th:first-child, .plan-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--panel); }
 .plan-table tbody tr:hover td:first-child { background: var(--panel-2); }
 @media (max-width: 640px) { .plan-table .plan-name small { white-space: nowrap; } .plan-table td:first-child { box-shadow: 6px 0 8px -6px rgba(0, 0, 0, 0.6); } }
+.plan-note.warn-note { color: var(--amber); }
+.plan-note.warn-note a { color: inherit; }
