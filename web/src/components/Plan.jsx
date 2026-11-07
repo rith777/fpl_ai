@@ -1,6 +1,6 @@
-import React, { useContext, useEffect, useMemo, useState } from "react";
+import React, { useContext, useMemo } from "react";
 import { Badge, Dropdown, FdrChip, TeamsContext } from "./ui.jsx";
-import { bestMoves, bestXI, expectedPoints, horizon, sigmaGain, unavailable } from "../transfers.js";
+import { HIT_COST, bestMoves, bestXI, expectedPoints, horizon, sigmaGain, transferPlan, unavailable, userPlanOptions } from "../transfers.js";
 import { POSITIONS } from "../lib.js";
 
 // How far ahead the plan looks, in gameweeks.
@@ -70,10 +70,9 @@ function verdict(p, { upgrade, inXI, turn, nextGw, last, band }) {
   return { tone: doubt ? "warn" : "good", label: doubt ? "Monitor" : "Keep", text: `${doubt}${small}${fx}` };
 }
 
-const planKey = (teamId) => `fplPlan:${teamId || "draft"}`;
-const readPlans = (teamId) => { try { return JSON.parse(localStorage.getItem(planKey(teamId)) || "{}"); } catch { return {}; } };
-
-export default function Plan({ squad, players, bank, priceOf, recency, nextGw, deadlines = {}, teamId }) {
+export default function Plan({
+  squad, players, bank, priceOf, recency, nextGw, deadlines = {}, plans, setPlan, freeTransfers, patient, onApply,
+}) {
   const teams = useContext(TeamsContext);
   const w = horizon();
   const gws = useMemo(() => Array.from({ length: AHEAD }, (_, i) => nextGw + i), [nextGw]);
@@ -81,21 +80,24 @@ export default function Plan({ squad, players, bank, priceOf, recency, nextGw, d
   const runs = useMemo(() => fixtureRuns(teams, windows, w), [teams, windows, w]);
   const last = gws[gws.length - 1];
 
-  // The manager's own plan per player, kept in this browser only.
-  const [plans, setPlans] = useState(() => readPlans(teamId));
-  useEffect(() => setPlans(readPlans(teamId)), [teamId]);
-  const setPlan = (id, v) => setPlans((p) => {
-    const next = { ...p, [id]: v };
-    if (v === "") delete next[id];
-    try { localStorage.setItem(planKey(teamId), JSON.stringify(next)); } catch { /* private mode: plan lasts this visit */ }
-    return next;
-  });
+  // The manager's own plan per player (kept in this browser): a held player
+  // is never sold this week, and one marked to sell goes first, so the rest of
+  // the plan works around both.
   const planOptions = [
     { value: "", label: "No plan yet" },
     { value: "keep", label: "Long-term keep" },
-    ...gws.map((g) => ({ value: `gw${g}`, label: `Sell before GW${g}` })),
     { value: "now", label: "Sell this week" },
+    ...gws.slice(1).map((g) => ({ value: `gw${g}`, label: `Hold, sell for GW${g}` })),
   ];
+
+  // This week's moves with the manager's plan applied.
+  const plan = useMemo(() => (squad.length === 15
+    ? transferPlan({ squad, players, bank, priceOf, recency, freeTransfers, ...userPlanOptions() }) : []),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [squad, players, bank, priceOf, recency, freeTransfers, plans, patient]);
+  const planMoves = plan.flatMap((it) => it.moves);
+  const planHits = plan.reduce((t, it) => t + it.hits, 0);
+  const planGainShown = plan.reduce((t, it) => t + it.gain, 0) - (planHits * HIT_COST) / horizon();
 
   // International breaks ahead: deadlines far apart.
   const breaks = useMemo(() => gws.slice(1).filter((g) => {
@@ -135,6 +137,35 @@ export default function Plan({ squad, players, bank, priceOf, recency, nextGw, d
 
   return (
     <div className="plan-page">
+      <section className="card plan-week">
+        <div className="card-head wrap">
+          <div>
+            <h2>This week's moves, with your plan</h2>
+            <p className="hint">Held players are never sold; players you mark to sell go first, and the money they free
+              goes where it scores most. {freeTransfers} free transfer{freeTransfers === 1 ? "" : "s"}{patient ? " · Patient" : ""}.</p>
+          </div>
+          {planMoves.length > 0 && onApply && (
+            <button className="btn sm primary" onClick={() => { onApply(planMoves); window.location.hash = "#/transfers"; }}>Apply</button>
+          )}
+        </div>
+        {planMoves.length ? (
+          <ul className="plan-moves">
+            {planMoves.map((m) => (
+              <li key={m.out.player_id}>
+                <span className="pt-player"><Badge teamId={m.out.team_id} size={16} />{m.out.player_name}</span>
+                <span className="arrow" aria-hidden>→</span>
+                <span className="pt-player"><Badge teamId={m.in.team_id} size={16} />{m.in.player_name}</span>
+                <small>£{m.in.price.toFixed(1)}m{plans[m.out.player_id] ? " · your plan" : ""}</small>
+              </li>
+            ))}
+            <li className="plan-total">
+              {planGainShown >= 0 ? "+" : ""}{planGainShown.toFixed(1)} pts/GW over the next {horizon()} GWs
+              {planHits ? ` after a −${planHits * HIT_COST} hit` : ""}
+            </li>
+          </ul>
+        ) : <p className="plan-note">No move worth a transfer: roll it.</p>}
+      </section>
+
       <section className="card plan-summary">
         <div className="card-head wrap">
           <div>
@@ -216,7 +247,7 @@ export default function Plan({ squad, players, bank, priceOf, recency, nextGw, d
                     <small>{o.text}</small>
                   </td>
                   <td className="left">
-                    <Dropdown value={plans[p.player_id] ?? ""} options={planOptions} align="right"
+                    <Dropdown value={plans[p.player_id] ?? ""} options={planOptions} align="right" floating
                       onChange={(v) => setPlan(p.player_id, v)} />
                   </td>
                 </tr>

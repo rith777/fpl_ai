@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { fdrBand } from "../lib.js";
 
@@ -118,34 +118,37 @@ export function Floating({ anchorRef, onClose, className = "", children }) {
   );
 }
 
-// Animated dropdown. options: [{ value, label, icon? }].
-export function Dropdown({ value, options, onChange, label, align = "left", className = "" }) {
+// Animated dropdown. options: [{ value, label, icon? }]. `floating` renders the
+// menu in <body> (Floating), for dropdowns inside a scrolling table that would
+// otherwise clip it.
+export function Dropdown({ value, options, onChange, label, align = "left", className = "", floating = false }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
-  useOutside(ref, () => setOpen(false), open);
+  const btn = useRef(null);
+  const close = useCallback(() => setOpen(false), []);
+  useOutside(ref, close, open && !floating);
   const current = options.find((o) => o.value === value) ?? options[0];
+  const items = options.map((o) => (
+    <li key={o.value}>
+      <button type="button" role="option" aria-selected={o.value === value}
+        className={o.value === value ? "active" : ""}
+        onClick={() => { onChange(o.value); setOpen(false); }}>
+        {o.icon}<span>{o.label}</span>{o.value === value && <span className="tick">✓</span>}
+      </button>
+    </li>
+  ));
   return (
     <div className={`dd ${open ? "open" : ""} ${className}`} ref={ref}>
-      <button type="button" className="dd-btn" aria-haspopup="listbox" aria-expanded={open}
+      <button type="button" className="dd-btn" aria-haspopup="listbox" aria-expanded={open} ref={btn}
         onClick={() => setOpen((o) => !o)}>
         {label && <span className="dd-label">{label}</span>}
         {current?.icon}
         <span className="dd-value">{current?.label}</span>
         <span className="caret" aria-hidden>▾</span>
       </button>
-      {open && (
-        <ul className={`dd-menu ${align}`} role="listbox">
-          {options.map((o) => (
-            <li key={o.value}>
-              <button type="button" role="option" aria-selected={o.value === value}
-                className={o.value === value ? "active" : ""}
-                onClick={() => { onChange(o.value); setOpen(false); }}>
-                {o.icon}<span>{o.label}</span>{o.value === value && <span className="tick">✓</span>}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      {open && (floating
+        ? <Floating anchorRef={btn} onClose={close} className="dd-floating"><ul className="dd-menu" role="listbox">{items}</ul></Floating>
+        : <ul className={`dd-menu ${align}`} role="listbox">{items}</ul>)}
     </div>
   );
 }

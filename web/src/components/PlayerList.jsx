@@ -86,7 +86,7 @@ export default function PlayerList({ players, placedIds, recency, onPick, pos, s
                 </span>
                 <span title="Average minutes per appearance">{Math.round(avgMins(p))}′</span>
                 <span title="Expected goal involvements per 90 (needs ~3 full games)">xGI {METRICS.xgi.get(p).toFixed(2)}</span>
-                <span title="Value: predicted points per £m">Val {adjValue(p, recency).toFixed(2)}</span>
+                {extraKey !== "value" && <span title="Value: predicted points per £m">Val {adjValue(p, recency).toFixed(2)}</span>}
               </div>
               {picked && <span className="picked-tick" aria-label="In squad">✓</span>}
             </div>

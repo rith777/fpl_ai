@@ -56,10 +56,10 @@ function Status({ clubs, nextGw, total, now, team, ftLeft, bank }) {
 const Heading = ({ children }) => <h2 className="tw-section">{children}</h2>;
 
 // The best transfer(s) with the free transfers left, or the call to roll.
-function Transfer({ squad, players, bank, priceOf, recency, freeTransfers, made, onApply, patient }) {
+function Transfer({ squad, players, bank, priceOf, recency, freeTransfers, made, onApply, patient, userPlan }) {
   const ftLeft = Math.max(0, freeTransfers - made);
   const plan = useMemo(() => transferPlan({ squad, players, bank, priceOf, recency, freeTransfers: ftLeft, ...userPlanOptions() }),
-    [squad, players, bank, priceOf, recency, ftLeft, patient]);
+    [squad, players, bank, priceOf, recency, ftLeft, patient, userPlan]);
   const roll = rollCheck({ plan, freeTransfers: ftLeft, squad });
   const moves = plan.flatMap((it) => it.moves);
   const gain = plan.reduce((t, it) => t + it.gain - (it.hits * HIT_COST) / horizon(), 0);

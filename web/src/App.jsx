@@ -18,7 +18,7 @@ import About from "./components/About.jsx";
 import Start from "./components/Start.jsx";
 import { Beta, Segmented, TeamsContext } from "./components/ui.jsx";
 import { fetchTeam, fetchPending, savePending, saveSquad, saveLineup, withPending, loadRecentTeams, saveRecentTeams } from "./fpl.js";
-import { configureModel, lineupCheck, lineupPoints, setPatient } from "./transfers.js";
+import { configureModel, lineupCheck, lineupPoints, setPatient, setUserPlan } from "./transfers.js";
 
 // Would adding `pos` to the current starters keep a legal XI reachable?
 function canStart(starters, pos) {
@@ -80,6 +80,17 @@ export default function App() {
   // Patient transfers: the manager's choice, remembered in this browser.
   const [patient, setPatientState] = useState(() => { try { return localStorage.getItem("fplPatient") === "1"; } catch { return false; } });
   setPatient(patient);
+  // The manager's plan per player (Squad plan), kept in this browser per team.
+  const planKey = `fplPlan:${team?.id ?? "draft"}`;
+  const readPlans = (key) => { try { return JSON.parse(localStorage.getItem(key) || "{}"); } catch { return {}; } };
+  const [plans, setPlans] = useState(() => readPlans(planKey));
+  useEffect(() => setPlans(readPlans(planKey)), [planKey]);
+  const setPlan = useCallback((id, v) => setPlans((cur) => {
+    const next = { ...cur, [id]: v };
+    if (!v) delete next[id];
+    try { localStorage.setItem(planKey, JSON.stringify(next)); } catch { /* private mode: this visit only */ }
+    return next;
+  }), [planKey]);
   const choosePatient = (on) => {
     setPatientState(on);
     try { localStorage.setItem("fplPatient", on ? "1" : "0"); } catch { /* private mode: this visit only */ }
@@ -391,6 +402,7 @@ export default function App() {
   const total = starterPlayers.length === 11 && benchPlayers.length === 4
     ? lineupPoints(starterPlayers, benchPlayers, captain, vice, recency) : xiTotal;
   const nextGw = (clubs.current_gw ?? team?.gw ?? 0) + 1;
+  setUserPlan(plans, nextGw);
   // FPL won't share picks with the hosted site: keep the lineup set here each
   // week for History to grade.
   useEffect(() => {
@@ -487,7 +499,7 @@ export default function App() {
     page = <ThisWeek clubs={clubs} team={team} loading={teamLoading} onLoad={loadTeam} savedTeamId={savedTeamId}
       recent={recent} players={players} squad={squad} nextGw={nextGw} total={total} captain={captain} vice={vice}
       lineup={lineup} onBestXI={applyBestXI} bank={budget - spent} priceOf={priceOf} recency={recency}
-      freeTransfers={freeTransfers} made={transfersMade} onApply={applyTransfers} patient={patient} />;
+      freeTransfers={freeTransfers} made={transfersMade} onApply={applyTransfers} patient={patient} userPlan={plans} />;
   } else if (route === "transfers") {
     page = (
       <div className="squad-layout wide-side">
@@ -497,7 +509,7 @@ export default function App() {
             onUndoPending={undoPending} onCommit={commitTransfers}
             squad={squad} players={players}
             bank={budget - spent} priceOf={priceOf} recency={recency}
-            freeTransfers={freeTransfers} setFreeTransfers={setFreeTransfers} patient={patient} setPatient={choosePatient}
+            freeTransfers={freeTransfers} setFreeTransfers={setFreeTransfers} patient={patient} setPatient={choosePatient} userPlan={plans}
             made={transfersMade} onApply={applyTransfers}
             placedIds={placedIds} onPick={togglePick} listPos={listPos} setListPos={setListPos} />
         </aside>
@@ -508,7 +520,9 @@ export default function App() {
   } else if (route === "fixtures") {
     page = <Fixtures currentGw={clubs.current_gw} squad={squad} />;
   } else if (route === "plan") {
-    page = <Plan squad={squad} players={players} bank={budget - spent} priceOf={priceOf} recency={recency} nextGw={nextGw} deadlines={clubs.deadlines} teamId={team?.id} />;
+    page = <Plan squad={squad} players={players} bank={budget - spent} priceOf={priceOf} recency={recency} nextGw={nextGw}
+      deadlines={clubs.deadlines} plans={plans} setPlan={setPlan} patient={patient} onApply={applyTransfers}
+      freeTransfers={Math.max(0, freeTransfers - transfersMade)} />;
   } else if (route === "history") {
     page = <History team={team} players={players} />;
   } else if (route === "strategy") {
