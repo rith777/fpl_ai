@@ -18,7 +18,7 @@ import About from "./components/About.jsx";
 import Start from "./components/Start.jsx";
 import { Beta, Segmented, TeamsContext } from "./components/ui.jsx";
 import { fetchTeam, fetchPending, savePending, saveSquad, saveLineup, withPending, loadRecentTeams, saveRecentTeams } from "./fpl.js";
-import { configureModel, lineupCheck, lineupPoints } from "./transfers.js";
+import { configureModel, lineupCheck, lineupPoints, setPatient } from "./transfers.js";
 
 // Would adding `pos` to the current starters keep a legal XI reachable?
 function canStart(starters, pos) {
@@ -77,6 +77,13 @@ export default function App() {
   const [team, setTeam] = useState(null);           // loaded real FPL team (see fpl.js)
   const [teamLoading, setTeamLoading] = useState(false);
   const [freeTransfers, setFreeTransfers] = useState(1);
+  // Patient transfers: the manager's choice, remembered in this browser.
+  const [patient, setPatientState] = useState(() => { try { return localStorage.getItem("fplPatient") === "1"; } catch { return false; } });
+  setPatient(patient);
+  const choosePatient = (on) => {
+    setPatientState(on);
+    try { localStorage.setItem("fplPatient", on ? "1" : "0"); } catch { /* private mode: this visit only */ }
+  };
   const [recentTeams, setRecentTeams] = useState(loadRecentTeams); // for the team-ID dropdown
   const [listPos, setListPos] = useState("ALL");
   const autoLoaded = useRef(false);
@@ -480,7 +487,7 @@ export default function App() {
     page = <ThisWeek clubs={clubs} team={team} loading={teamLoading} onLoad={loadTeam} savedTeamId={savedTeamId}
       recent={recent} players={players} squad={squad} nextGw={nextGw} total={total} captain={captain} vice={vice}
       lineup={lineup} onBestXI={applyBestXI} bank={budget - spent} priceOf={priceOf} recency={recency}
-      freeTransfers={freeTransfers} made={transfersMade} onApply={applyTransfers} />;
+      freeTransfers={freeTransfers} made={transfersMade} onApply={applyTransfers} patient={patient} />;
   } else if (route === "transfers") {
     page = (
       <div className="squad-layout wide-side">
@@ -490,7 +497,7 @@ export default function App() {
             onUndoPending={undoPending} onCommit={commitTransfers}
             squad={squad} players={players}
             bank={budget - spent} priceOf={priceOf} recency={recency}
-            freeTransfers={freeTransfers} setFreeTransfers={setFreeTransfers}
+            freeTransfers={freeTransfers} setFreeTransfers={setFreeTransfers} patient={patient} setPatient={choosePatient}
             made={transfersMade} onApply={applyTransfers}
             placedIds={placedIds} onPick={togglePick} listPos={listPos} setListPos={setListPos} />
         </aside>

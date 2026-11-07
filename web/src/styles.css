@@ -1119,3 +1119,5 @@ h1 .beta { font-size: 11px; margin-left: 10px; }
 .plan-tag.good { background: rgba(1, 252, 122, 0.16); color: var(--green); }
 .plan-tag.warn { background: rgba(255, 184, 0, 0.16); color: var(--amber); }
 .plan-tag.bad { background: rgba(255, 23, 81, 0.16); color: var(--red); }
+.patient { margin: 10px 0 4px; }
+.patient .hint { margin: 6px 0 0; }
