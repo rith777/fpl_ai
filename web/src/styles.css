@@ -1094,3 +1094,28 @@ h1 .beta { font-size: 11px; margin-left: 10px; }
 .tl-name small { color: var(--muted); font-size: 11px; }
 .dd-menu .tl-forget { width: auto; flex: none; padding: 6px 10px; color: var(--muted); }
 .dd-menu .tl-forget:hover { color: #ff7a8f; }
+
+/* Squad plan */
+.plan-page { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+.plan-note { margin: 0 0 10px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.plan-note b { color: var(--text); }
+.plan-timeline { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
+.plan-timeline li { display: flex; gap: 12px; align-items: baseline; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.03); animation: fadeUp 0.3s both; }
+.plan-timeline li.now { background: rgba(255, 255, 255, 0.07); box-shadow: inset 3px 0 0 var(--amber); }
+.pt-gw { font-weight: 700; min-width: 48px; font-variant-numeric: tabular-nums; }
+.pt-who { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
+.pt-player { display: inline-flex; align-items: center; gap: 5px; }
+.pt-player em { font-style: normal; font-size: 11px; color: var(--muted); }
+.plan-table td { vertical-align: middle; }
+.plan-table tr.pos-first td { border-top: 1px solid rgba(255, 255, 255, 0.12); }
+.plan-name { display: grid; line-height: 1.2; }
+.plan-name small { color: var(--muted); display: inline-flex; align-items: center; gap: 5px; }
+.plan-name .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.plan-name .dot.doubt { background: var(--amber); }
+.plan-name .dot.out { background: var(--red); }
+.plan-say { white-space: normal !important; min-width: 220px; max-width: 320px; }
+.plan-say small { display: block; color: var(--muted); margin-top: 3px; line-height: 1.35; }
+.plan-tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); }
+.plan-tag.good { background: rgba(1, 252, 122, 0.16); color: var(--green); }
+.plan-tag.warn { background: rgba(255, 184, 0, 0.16); color: var(--amber); }
+.plan-tag.bad { background: rgba(255, 23, 81, 0.16); color: var(--red); }

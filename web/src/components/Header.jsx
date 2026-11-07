@@ -10,6 +10,7 @@ export const PAGES = [
   { id: "team", label: "My Team", also: ["transfers"] },
   { id: "stats", label: "Statistics" },
   { id: "fixtures", label: "Fixtures" },
+  { id: "plan", label: "Squad plan", beta: true },
   { id: "history", label: "History", beta: true },
   { id: "strategy", label: "Strategy", beta: true },
   { id: "start", label: "New to FPL", guide: true },

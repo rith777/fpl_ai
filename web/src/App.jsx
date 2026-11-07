@@ -9,6 +9,7 @@ import PlayerList from "./components/PlayerList.jsx";
 import Summary from "./components/Summary.jsx";
 import Stats from "./components/Stats.jsx";
 import Fixtures from "./components/Fixtures.jsx";
+import Plan from "./components/Plan.jsx";
 import History from "./components/History.jsx";
 import Strategy from "./components/Strategy.jsx";
 import TransfersPanel from "./components/TransfersPanel.jsx";
@@ -38,7 +39,7 @@ function xiProblem(xi) {
 }
 
 const FOOTER = [
-  ["Plan", [["This week", "#/home"], ["My Team", "#/team"], ["Statistics", "#/stats"], ["Fixtures", "#/fixtures"]]],
+  ["Plan", [["This week", "#/home"], ["My Team", "#/team"], ["Statistics", "#/stats"], ["Fixtures", "#/fixtures"], ["Squad plan", "#/plan"]]],
   ["Review", [["History", "#/history"], ["Strategy", "#/strategy"]]],
   ["Learn", [["New to FPL", "#/start"], ["About", "#/about"], ["GitHub", "https://github.com/rith777/fpl_ai"]]],
 ];
@@ -455,6 +456,7 @@ export default function App() {
     transfers: ["My Team", gwLine],
     stats: ["Statistics", `${players.length} players · projections weighted ${recencyLabel(recency).toLowerCase()}`],
     fixtures: ["Fixtures", `Gameweeks ${nextGw}+ · ${clubs.teams.length} clubs`],
+    plan: ["Squad plan", "How long to hold each player, and when your transfers fall due"],
     history: ["History", team ? `${team.name} · each move graded on what was known at the time` : "Your season, week by week"],
     strategy: ["Strategy", team ? `${team.name}'s moves vs the model's, scored on real points` : "What past seasons say works"],
     start: ["New to FPL", "How the game works, in plain words, and how to join"],
@@ -498,6 +500,8 @@ export default function App() {
     page = <Stats players={players} recency={recency} placedIds={placedIds} onPick={togglePick} />;
   } else if (route === "fixtures") {
     page = <Fixtures currentGw={clubs.current_gw} squad={squad} />;
+  } else if (route === "plan") {
+    page = <Plan squad={squad} nextGw={nextGw} deadlines={clubs.deadlines} teamId={team?.id} />;
   } else if (route === "history") {
     page = <History team={team} players={players} />;
   } else if (route === "strategy") {
