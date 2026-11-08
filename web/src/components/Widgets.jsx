@@ -24,7 +24,7 @@ const pad = (n) => String(n).padStart(2, "0");
 // ---------- Deadline countdown ring ----------
 // The ring is the share of the gap between the last deadline and the next one
 // still to run; it drains to the deadline and pulses in the final 24 hours.
-export function DeadlineRing({ deadlines = {}, nextGw, ftLeft, bank }) {
+export function DeadlineRing({ deadlines = {}, nextGw, ftLeft, lineup }) {
   const now = useTick(1000);
   const mounted = useMounted();
   const end = deadlines[nextGw] ? new Date(deadlines[nextGw]).getTime() : null;
@@ -55,7 +55,7 @@ export function DeadlineRing({ deadlines = {}, nextGw, ftLeft, bank }) {
       </div>
       <div className="ring-stats">
         <span><b>{ftLeft}</b> free transfer{ftLeft === 1 ? "" : "s"}</span>
-        <span><b>£{(Math.abs(bank) < 0.05 ? 0 : bank).toFixed(1)}m</b> in the bank</span>
+        <span>{lineup?.gain > 0 ? <><b className="warn">+{lineup.gain.toFixed(1)}</b> pts on your bench</> : <><b>✓</b> best XI set</>}</span>
       </div>
       {end && <small className="wg-foot">{new Date(end).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</small>}
     </section>

@@ -568,7 +568,7 @@ export default function Stats({ players, recency, placedIds, onPick }) {
   const [nailed, setNailed] = useState(false);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState({ key: "points", dir: -1 });
-  const [limit, setLimit] = useState(50);
+  const [limit, setLimit] = useState(25);
   const [curvePos, setCurvePos] = useState(new Set());
 
   const teamOptions = useMemo(() => [
@@ -718,7 +718,7 @@ export default function Stats({ players, recency, placedIds, onPick }) {
           </table>
         </div>
         {table.length > limit && (
-          <button className="btn ghost block" onClick={() => setLimit((l) => l + 50)}>
+          <button className="btn ghost block" onClick={() => setLimit((l) => l + 25)}>
             Show more ({table.length - limit} left)
           </button>
         )}

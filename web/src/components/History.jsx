@@ -341,7 +341,7 @@ export default function History({ team, players }) {
 
   return (
     <div className="history">
-      <section className="card">
+      {!(status?.startsWith("Couldn't") && !weeks.length) && <section className="card">
         <div className="card-head"><h2>Season so far</h2></div>
         <div className="hx-summary">
           <div><small>Points · rank</small><b>{last ? `${last.total_points} · ${last.overall_rank?.toLocaleString()}` : "—"}</b></div>
@@ -356,8 +356,10 @@ export default function History({ team, players }) {
         </div>
         {estimated && <p className="hint">Squads worked back from the one saved in this browser; captains and lineups graded for the {setHere} weeks you set them here.</p>}
         <More to="grading">How weeks are graded</More>
-      </section>
-      {status && <div className="loading"><span className="spinner" aria-hidden />{status}</div>}
+      </section>}
+      {status && (status.startsWith("Couldn't")
+        ? <p className="load-error" role="alert">{status} Try reloading your team from the menu at the top right.</p>
+        : <div className="loading"><span className="spinner" aria-hidden />{status}</div>)}
       {[...weeks].reverse().map((w, i) => <Week key={w.gw} w={w} i={i} band={band} />)}
       <ReportCard />
     </div>

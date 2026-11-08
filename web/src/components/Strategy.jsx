@@ -158,7 +158,9 @@ function YourMoves({ team, players }) {
             <small>the model's pick minus yours, that week's points</small></div>}
         </div>
       )}
-      {status && <div className="loading"><span className="spinner" aria-hidden />{status}</div>}
+      {status && (status.startsWith("Couldn't")
+        ? <p className="load-error" role="alert">{status} Try reloading your team from the menu at the top right.</p>
+        : <div className="loading"><span className="spinner" aria-hidden />{status}</div>)}
       {rows.length > 0 && (
         <div className="st-table-wrap">
           <table className="st-table st-weeks">
