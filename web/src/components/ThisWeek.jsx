@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { POS_COLOR, adjPoints } from "../lib.js";
 import { CHIP_NAMES, chipsLeft } from "../rules.js";
+import { CaptainDuel, DeadlineRing, PointsRace, PriceRadar } from "./Widgets.jsx";
 import { HIT_COST, horizon, model, rollCheck, transferPlan, userPlanOptions } from "../transfers.js";
 import { chipCall, tagFor } from "./TransfersPanel.jsx";
 import { TeamLoader } from "./Header.jsx";
@@ -284,6 +285,13 @@ export default function ThisWeek(props) {
             <Lineup captain={captain} vice={vice} lineup={lineup} onBestXI={onBestXI} recency={recency} />
             <Transfer {...props} />
             {team && <Chips squad={squad} used={team.chipsUsed} nextGw={nextGw} />}
+          </div>
+          <Heading>At a glance</Heading>
+          <div className="wg-grid">
+            <DeadlineRing deadlines={clubs.deadlines} nextGw={nextGw} ftLeft={ftLeft} bank={props.bank} />
+            <PointsRace squad={squad} recency={recency} />
+            <CaptainDuel squad={squad} recency={recency} />
+            <PriceRadar players={props.players} squad={squad} />
           </div>
           {team && <>
             <Heading>Coming up</Heading>
