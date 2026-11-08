@@ -203,7 +203,7 @@ const byBetter = (a, b) => (better(a, b) ? -1 : better(b, a) ? 1 : 0);
 
 // Best like-for-like replacement for each squad player (same position,
 // affordable from their selling price + bank, club limit kept).
-export function bestMoves({ squad, players, bank, priceOf, recency, locked, mustSell }) {
+export function bestMoves({ squad, players, bank, priceOf, recency, locked, mustSell, any = false }) {
   const score = scorer(recency);
   const base = squadValue(squad, score);
   const ownedIds = new Set(squad.map((p) => p.player_id));
@@ -220,8 +220,9 @@ export function bestMoves({ squad, players, bank, priceOf, recency, locked, must
       const m = { ...evaluate(squad, [out], [c], score, base), moves: [{ out, in: c, cost }] };
       if (better(m, best)) best = m;
     }
-    // A sale the manager has decided on is offered even when it loses points.
-    if (best && (best.gain > 0 || mustSell?.has(out.player_id))) items.push(best);
+    // A sale the manager has decided on is offered even when it loses points;
+    // `any` keeps every sale's best buy (the plan sizes show the cost of those).
+    if (best && (any || best.gain > 0 || mustSell?.has(out.player_id))) items.push(best);
   }
   return items.sort(byBetter);
 }
@@ -430,10 +431,12 @@ export function planOptions({ squad, players, bank, priceOf, recency, freeTransf
   const ctx = { players, priceOf, recency, locked, mustSell };
   const chain = (items, sq, b) => {
     while (items.reduce((t, it) => t + it.moves.length, 0) < upTo) {
-      // The manager's decided sales first, then the best move while it adds points.
-      const moves = bestMoves({ ...ctx, squad: sq, bank: b });
+      // The manager's decided sales first, then the best move left, even one
+      // that costs points: every size is shown, with what it's worth, so you
+      // can see why the model stops where it does.
+      const moves = bestMoves({ ...ctx, squad: sq, bank: b, any: true });
       const m = moves.find((x) => decided(ctx, x)) ?? moves.find((x) => !decided(ctx, x));
-      if (!m || (!decided(ctx, m) && shown(m.gain) <= 0)) break;
+      if (!m) break;
       items.push(m);
       sq = applyMoves(sq, m.moves);
       b -= spend(m.moves);
@@ -760,4 +763,41 @@ export function moveVerdict(gain, best) {
   if (best - gain > band) return { cls: "bad", label: "Bad", why: `the best plan is better by more than the margin of error (+${(best - gain).toFixed(1)}/GW)` };
   if (shown(gain) >= 0) return { cls: "good", label: "Good", why: shown(gain) >= shown(best) ? "the best plan available" : "as good as the best plan, within the model's margin of error" };
   return { cls: "ok", label: "Average", why: "slightly negative on projections, but inside the margin of error" };
+}
+
+// "What if I sell him?": the best that selling one player can do this week,
+// two ways. A straight swap at his price, and cashing him in: a cheaper
+// player in his place, with the money freed spent on the best upgrade
+// elsewhere in the squad (two transfers). Gains are for the whole squad, per
+// gameweek over the horizon; a negative gain means he's worth his price.
+export function sellTest({ squad, players, bank, priceOf, recency, out, locked = null, tries = 4, cashIn = true }) {
+  const score = scorer(recency);
+  const base = squadValue(squad, score);
+  const ownedIds = new Set(squad.map((p) => p.player_id));
+  const others = squad.filter((p) => p !== out);
+  const funds = priceOf(out) + bank;
+  let swap = null;
+  const cheaper = [];
+  for (const c of players) {
+    if (c.position !== out.position || ownedIds.has(c.player_id) || c.price > funds + 1e-9 || !clubsFit(others, [c])) continue;
+    const m = { ...evaluate(squad, [out], [c], score, base), moves: [{ out, in: c, cost: c.price - priceOf(out) }] };
+    if (better(m, swap)) swap = m;
+    if (c.price <= priceOf(out) - 1) cheaper.push({ c, s: score(c) });
+  }
+  // Cash him in: the strongest few cheaper players, each with the best buy the
+  // money left then affords.
+  let cash = null;
+  if (!cashIn) return { swap, cash };
+  const skip = new Set([...(locked ?? [])]);
+  for (const { c } of cheaper.sort((a, b) => b.s - a.s).slice(0, tries)) {
+    const first = { out, in: c, cost: c.price - priceOf(out) };
+    const sq = applyMoves(squad, [first]);
+    const next = bestMoves({ squad: sq, players: players.filter((p) => p !== c && p.player_id !== out.player_id), bank: bank - first.cost, priceOf, recency,
+      locked: new Set([...skip, c.player_id]) })[0];
+    if (!next) continue;
+    const moves = [first, ...next.moves];
+    const m = { ...evaluate(squad, [out, next.moves[0].out], [c, next.moves[0].in], score, base), moves };
+    if (better(m, cash)) cash = m;
+  }
+  return { swap, cash };
 }

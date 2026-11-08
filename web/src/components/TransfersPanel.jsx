@@ -358,12 +358,22 @@ function PatientToggle({ patient, setPatient }) {
   );
 }
 
+const planSize = (items) => items.reduce((t, it) => t + it.moves.length, 0);
+
 export default function TransfersPanel({
   team, loading, onLoad, savedTeamId, recent, onUndoPending, onCommit,
   squad, players, bank, priceOf, recency, freeTransfers, setFreeTransfers, made, onApply,
   placedIds, onPick, listPos, setListPos, patient, setPatient, userPlan, onReset,
 }) {
   const [tab, setTab] = useState("plan");
+  // Your Squad plan steers the planner; this shows plans without it.
+  const [ignorePlan, setIgnorePlan] = useState(false);
+  const steer = useMemo(() => {
+    const o = userPlanOptions();
+    return ignorePlan ? { ...o, locked: null, mustSell: null } : o;
+  }, [ignorePlan, userPlan, patient]);
+  const held = steer.locked?.size ?? 0, selling = steer.mustSell?.size ?? 0;
+  const steered = Object.keys(userPlan ?? {}).length > 0;
   const nameOf = useMemo(() => Object.fromEntries(players.map((p) => [p.player_id, p.player_name])), [players]);
   const r = useDeferredValue(recency); // keep the slider smooth while plans recompute
 
@@ -371,22 +381,23 @@ export default function TransfersPanel({
   const ftLeft = Math.max(0, freeTransfers - made);
   const hits = Math.max(0, made - freeTransfers) * HIT_COST;
   const plan = useMemo(
-    () => (ready && tab === "plan" ? transferPlan({ squad, players, bank, priceOf, recency: r, freeTransfers: ftLeft, ...userPlanOptions() }) : []),
-    [ready, tab, squad, players, bank, priceOf, r, ftLeft, patient, userPlan]);
+    () => (ready && tab === "plan" ? transferPlan({ squad, players, bank, priceOf, recency: r, freeTransfers: ftLeft, ...steer }) : []),
+    [ready, tab, squad, players, bank, priceOf, r, ftLeft, steer]);
   const targets = useMemo(
-    () => (ready && tab === "upgrades" ? upgradeTargets({ squad, players, bank, priceOf, recency: r, locked: userPlanOptions().locked }) : null),
-    [ready, tab, squad, players, bank, priceOf, r, userPlan]);
+    () => (ready && tab === "upgrades" ? upgradeTargets({ squad, players, bank, priceOf, recency: r, locked: steer.locked }) : null),
+    [ready, tab, squad, players, bank, priceOf, r, steer]);
   const roll = useMemo(
     () => rollCheck({ plan, freeTransfers: ftLeft, squad }), [plan, ftLeft, squad]);
-  // Side by side with the model's pick: the best plan for each number of
-  // moves, up to one past the free transfers (a −4 hit), in case you want it.
+  // Side by side with the model's pick: rolling, and the best plan for each
+  // number of moves up to one past the free transfers (a −4 hit), at least
+  // two and always as far as the model's pick, each with what it's worth
+  // (even when that's a loss).
   const options = useMemo(
-    () => (ready && tab === "plan" ? planOptions({ squad, players, bank, priceOf, recency: r, freeTransfers: ftLeft, upTo: ftLeft + 1, locked: userPlanOptions().locked, mustSell: userPlanOptions().mustSell }) : []),
-    [ready, tab, squad, players, bank, priceOf, r, ftLeft, userPlan]);
+    () => (ready && tab === "plan" ? planOptions({ squad, players, bank, priceOf, recency: r, freeTransfers: ftLeft, upTo: Math.max(2, ftLeft + 1, planSize(plan)), locked: steer.locked, mustSell: steer.mustSell }) : []),
+    [ready, tab, squad, players, bank, priceOf, r, ftLeft, steer, plan]);
   const [size, setSize] = useState(null); // moves in the plan shown; null: the model's pick
   useEffect(() => setSize(null), [ftLeft]);
-  const count = (items) => items.reduce((t, it) => t + it.moves.length, 0);
-  const pick = count(plan);
+  const pick = planSize(plan);
   const view = size ?? pick;
   const shown = view === pick ? plan : options[view - 1] ?? [];
   const stats = useMemo(() => positionStats(players), [players]);
@@ -475,30 +486,41 @@ export default function TransfersPanel({
               <button className="btn sm primary" onClick={() => onApply(shown.flatMap((it) => it.moves))}>Apply all</button>
             )}
           </div>
+          {steered && (
+            <div className={`plan-steer ${ignorePlan ? "off" : ""}`}>
+              <span>{ignorePlan ? "Ignoring your Squad plan: every player can be sold."
+                : <>Following your <a href="#/plan">Squad plan</a>{held ? `: ${held} held player${held > 1 ? "s" : ""} won't be sold` : ""}
+                  {selling ? `${held ? "," : ":"} ${selling} marked to sell go${selling > 1 ? "" : "es"} first` : ""}.</>}</span>
+              <button className="link" onClick={() => setIgnorePlan(!ignorePlan)}>{ignorePlan ? "Follow it" : "Show all moves"}</button>
+            </div>
+          )}
           <div className="plan-sizes">
-            {pick === 0 && (
-              <button className={view === 0 ? "on" : ""} onClick={() => setSize(0)}><b>Roll</b><small>model's pick</small></button>
-            )}
+            <button className={view === 0 ? "on" : ""} onClick={() => setSize(0)}>
+              <b>Roll</b><small>{pick === 0 ? "model's pick" : `save ${ftLeft ? "the transfer" + (ftLeft > 1 ? "s" : "") : "nothing"}`}</small>
+            </button>
             {options.map((o, k) => {
               const items = k + 1 === pick ? plan : o;
               const hit = items && items.reduce((t, it) => t + it.hits, 0) * HIT_COST;
               return items && (
-                <button key={k} className={view === k + 1 ? "on" : ""} onClick={() => setSize(k + 1)}>
+                <button key={k} className={`${view === k + 1 ? "on" : ""} ${gainOf(items) <= 0 ? "neg" : ""}`} onClick={() => setSize(k + 1)}>
                   <b>{k + 1} move{k ? "s" : ""}{hit > 0 && <em className="hit">−{hit}</em>}</b>
                   <small>{signed(gainOf(items))} pts/GW{k + 1 === pick ? " · model's pick" : ""}</small>
                 </button>
               );
             })}
           </div>
+          {shown.length > 0 && gainOf(shown) <= 0 && (
+            <p className="plan-warn">This plan costs points over the next {horizon()} GWs. It's here so you can compare; rolling is better.</p>
+          )}
           {shown.length ? <PlanCard items={shown} priceOf={priceOf} stats={stats} fairShare={fairShare} ctx={ctx} />
-            : <p className="empty">No move improves your team enough right now, so roll the transfer.</p>}
+            : pick === 0 ? <p className="empty">No move improves your team enough right now, so roll the transfer.</p>
+            : <p className="empty">Roll: make no moves and carry {Math.min(ftLeft + 1, model().max_free_transfers ?? 5)} free transfers into next week.
+                The model's pick ({pick} move{pick > 1 ? "s" : ""}) adds {signed(gainOf(plan))} pts/GW instead.</p>}
           {shown.length > 0 && (
             <p className="plan-foot">≈ {signed(gainOf(shown))} pts/GW{shown.some((it) => it.hits) ? " after hits" : ""} · £{bankAfter.toFixed(1)}m left</p>
           )}
           {roll && view === pick && <RollCheck roll={roll} moves={plan.flatMap((it) => it.moves).length} />}
-          {Object.keys(userPlan ?? {}).length > 0 && (
-            <p className="hint">Following your <a href="#/plan">Squad plan</a>: held players aren't sold, and players marked to sell go first.</p>
-          )}
+
         </section>
         </>
       )}

@@ -1,6 +1,6 @@
-import React, { useContext, useMemo } from "react";
-import { Badge, Dropdown, FdrChip, TeamsContext } from "./ui.jsx";
-import { HIT_COST, bestMoves, bestXI, expectedPoints, horizon, sigmaGain, transferPlan, unavailable, userPlanOptions } from "../transfers.js";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Badge, Dropdown, NextFixtures, Segmented, TeamsContext } from "./ui.jsx";
+import { HIT_COST, bestXI, expectedPoints, horizon, sellTest, sigmaGain, transferPlan, unavailable, userPlanOptions } from "../transfers.js";
 import { POSITIONS } from "../lib.js";
 
 // How far ahead the plan looks, in gameweeks.
@@ -47,27 +47,87 @@ function fixtureTurn(run, gws) {
   return i > 0 ? gws[i] : null;
 }
 
-// A player's verdict, from the model first and fixtures second:
-// ruled out → sell; a replacement at his price that adds more than the model's
-// margin of error → upgrade; otherwise keep, with when his fixtures turn.
-function verdict(p, { upgrade, inXI, turn, nextGw, last, band }) {
-  const fx = turn === "all" ? "Hard fixtures for as far as the plan looks."
-    : turn === "now" ? "Hard fixtures now, easing later."
-    : turn ? `Fixtures turn hard from GW${turn}.` : `No hard run through GW${last}.`;
-  const swap = upgrade && `${upgrade.in.player_name} (£${upgrade.in.price.toFixed(1)}m) projects +${upgrade.gain.toFixed(1)} pts/GW more`;
-  if (unavailable(p))
-    return { tone: "bad", label: "Sell", why: "ruled out", text: `${p.news || "Ruled out"}.${swap ? ` Best swap: ${swap}.` : ""}`, due: nextGw };
-  if (upgrade && upgrade.gain >= band)
-    return { tone: "bad", label: "Upgrade", why: "clear upgrade", text: `${swap}, beyond the model's margin of error (±${band.toFixed(1)}). ${fx}`, due: nextGw };
-  const doubt = p.status === "d" ? `${p.news || "A doubt"}. ` : "";
-  const small = swap ? `Best swap (${swap}) is inside the margin of error. ` : "No better player at his price. ";
-  if (!inXI)
-    return { tone: "neutral", label: "Bench", text: `${doubt}On your bench: upgrading him barely moves your score. ${fx}` };
-  if (turn === "all")
-    return { tone: "warn", label: "Watch", why: "hard run", text: `${doubt}${small}${fx}`, due: nextGw };
-  if (typeof turn === "number")
-    return { tone: doubt ? "warn" : "good", label: turn - 1 > nextGw ? `Keep to GW${turn - 1}` : `Review GW${turn}`, why: "fixtures turn", text: `${doubt}${small}${fx}`, due: turn };
-  return { tone: doubt ? "warn" : "good", label: doubt ? "Monitor" : "Keep", text: `${doubt}${small}${fx}` };
+const sgn = (g) => `${Math.round(g * 10) >= 0 ? "+" : "−"}${Math.abs(g).toFixed(1)}`;
+const clamp = (x) => Math.max(0, Math.min(10, x));
+// Bench cover this cheap barely moves the score either way: not worth a transfer.
+const FODDER = 4.6;
+
+// The keep score, 0 (sell now) to 10 (keep all season). Mostly the model:
+// the best that selling him can do this week (a straight swap, or cashing him
+// in and spending the money, counted per transfer), measured in units of the
+// model's margin of error, so a gain it can't tell from noise barely moves
+// the score. Then his fixtures over the next weeks and his fitness. Each
+// adjustment is listed as a reason.
+function keepScore(p, { test, inXI, run, turn, band, pct }) {
+  const reasons = [];
+  const swap = test?.swap?.gain ?? null;
+  const cash = test?.cash ? test.cash.gain / 2 : null;
+  const g = Math.max(swap ?? -Infinity, cash ?? -Infinity);
+  let score = 6;
+  if (Number.isFinite(g)) {
+    // A gain of one margin of error per transfer scores 2 (sell); breaking
+    // even scores 6; losing half a margin or more scores 8 and up.
+    score = 6 - 4 * (g / band);
+    const c = test.cash?.moves;
+    const how = g === swap ? `swap for ${test.swap.moves[0].in.player_name}`
+      : `swap for ${c[0].in.player_name}, spend the £${(-c[0].cost).toFixed(1)}m saved on ${c[1].out.player_name} → ${c[1].in.player_name}`;
+    reasons.push(Math.round(g * 10) > 0
+      ? { k: g >= band ? -2 : -1, t: `Best move: ${how}, ${sgn(g)} pts/GW per transfer${g < band ? " (inside the margin of error)" : ""}` }
+      : Math.round(g * 10) === 0 ? { k: 0, t: `Selling him gains nothing (best: ${how})` }
+      : { k: 2, t: `Every way of selling him loses points (best: ${how}, ${sgn(g)} per transfer)` });
+  }
+  // A long-term asset: how he ranks among regular starters in his position.
+  const POS = { GK: "keepers", DEF: "defenders", MID: "midfielders", FWD: "forwards" }[p.position];
+  if (pct >= 0.97) { score += 1.5; reasons.push({ k: 2, t: `One of the best ${POS} in the game (top 3%)` }); }
+  else if (pct >= 0.9) { score += 0.75; reasons.push({ k: 1, t: `Top 10% of ${POS}` }); }
+  else if (inXI && pct < 0.5) { score -= 0.75; reasons.push({ k: -1, t: `Below the average starting ${POS.slice(0, -1)}` }); }
+  if (run?.band === "easy") { score += 1; reasons.push({ k: 1, t: "Kind fixtures ahead" }); }
+  if (turn === "now" || turn === "all") { score -= 1.5; reasons.push({ k: -1, t: turn === "all" ? "Hard fixtures as far as we look" : "Hard fixtures now" }); }
+  else if (typeof turn === "number") { score -= 0.5; reasons.push({ k: -1, t: `Fixtures turn hard from GW${turn}` }); }
+  if (unavailable(p)) { score = Math.min(score, 0.5); reasons.unshift({ k: -2, t: p.news || "Ruled out" }); }
+  else if (p.status === "d") { score -= 1.5; reasons.unshift({ k: -1, t: p.news || "A doubt" }); }
+  else if ((p.start_prob ?? 1) < 0.5 && inXI) { score -= 1; reasons.push({ k: -1, t: `Starts only ${Math.round((p.start_prob ?? 0) * 100)}% of games` }); }
+  if (!inXI && p.price <= FODDER && (!p.status || p.status === "a")) { score = Math.max(score, 6.5); reasons.push({ k: 1, t: "Cheap bench cover: not worth a transfer" }); }
+  return { score: clamp(score), reasons: reasons.sort((a, b) => Math.abs(b.k) - Math.abs(a.k)) };
+}
+
+const TONE = (s) => (s < 3 ? "sell" : s < 5 ? "weak" : s < 7.5 ? "ok" : "keep");
+const WORD = (s) => (s < 3 ? "Sell" : s < 5 ? "Consider selling" : s < 7.5 ? "Fine to keep" : "Keep");
+
+// Keep / Sell / Auto from the stored plan ("gwN", an older choice, holds him until GW N).
+const choice = (plan, nextGw) => (!plan ? "auto" : plan === "now" || (plan.startsWith("gw") && +plan.slice(2) <= nextGw) ? "sell" : "keep");
+
+function Row({ r, i, plan, setPlan, open, onToggle, nextGw }) {
+  const { p, score, reasons, test, pending } = r;
+  return (
+    <li className={`kp-row ${TONE(score)} ${open ? "open" : ""}`} style={{ "--i": i, "--s": score / 10 }}>
+      <button type="button" className="kp-main" onClick={onToggle} aria-expanded={open}>
+        <span className="kp-rank">{i + 1}</span>
+        <Badge teamId={p.team_id} size={26} />
+        <span className="kp-name">
+          <b>{p.player_name}{p.status && p.status !== "a" && <i className={`dot ${p.status === "d" ? "doubt" : "out"}`} title={p.news} />}</b>
+          <small>{p.position} · £{p.price.toFixed(1)}m · {r.xp.toFixed(1)} xP/GW</small>
+        </span>
+        <span className="kp-meter" aria-label={`Keep score ${score.toFixed(1)} out of 10`}>
+          <span className="kp-track"><i /></span>
+          <span className="kp-num"><b>{score.toFixed(1)}</b><small>{pending ? "…" : WORD(score)}</small></span>
+        </span>
+        <span className="kp-why">{reasons[0]?.t ?? "—"}</span>
+      </button>
+      <span className="kp-plan">
+        <Segmented value={choice(plan, nextGw)} onChange={(v) => setPlan(p.player_id, v === "auto" ? null : v === "keep" ? "keep" : "now")}
+          options={[{ value: "auto", label: "Auto" }, { value: "keep", label: "Keep" }, { value: "sell", label: "Sell" }]} />
+      </span>
+      {open && (
+        <div className="kp-detail">
+          <ul>{reasons.map((x, k) => <li key={k} className={x.k > 0 ? "up" : x.k < 0 ? "down" : ""}>{x.t}</li>)}</ul>
+          {test?.swap && <p><b>{sgn(test.swap.gain)}</b> straight swap: {test.swap.moves[0].in.player_name} (£{test.swap.moves[0].in.price.toFixed(1)}m)</p>}
+          {test?.cash && <p><b>{sgn(test.cash.gain)}</b> cash in (2 transfers): {test.cash.moves.map((m) => `${m.out.player_name} → ${m.in.player_name}`).join(" + ")}</p>}
+          <p className="kp-fx">Next 6: <NextFixtures teamId={p.team_id} n={6} /></p>
+        </div>
+      )}
+    </li>
+  );
 }
 
 export default function Plan({
@@ -78,226 +138,120 @@ export default function Plan({
   const gws = useMemo(() => Array.from({ length: AHEAD }, (_, i) => nextGw + i), [nextGw]);
   const windows = gws.slice(0, AHEAD - w + 1);
   const runs = useMemo(() => fixtureRuns(teams, windows, w), [teams, windows, w]);
-  const last = gws[gws.length - 1];
+  const band = sigmaGain() || 1;
+  const full = squad.length === 15;
 
-  // The manager's own plan per player (kept in this browser): a held player
-  // is never sold this week, and one marked to sell goes first, so the rest of
-  // the plan works around both.
-  const planOptions = [
-    { value: "", label: "No plan yet" },
-    { value: "keep", label: "Long-term keep" },
-    { value: "now", label: "Sell this week" },
-    ...gws.slice(1).map((g) => ({ value: `gw${g}`, label: `Hold, sell for GW${g}` })),
-  ];
+  // Straight swaps for everyone at once (fast); the cash-in test, a few
+  // hundred ms a player, fills in one player per frame so the page stays live.
+  const [tests, setTests] = useState({});
+  const job = useRef(0);
+  useEffect(() => {
+    if (!full) return undefined;
+    const id = ++job.current;
+    const base = {};
+    for (const p of squad) base[p.player_id] = sellTest({ squad, players, bank, priceOf, recency, out: p, cashIn: false });
+    setTests(base);
+    const queue = [...squad];
+    const step = () => {
+      if (job.current !== id || !queue.length) return;
+      const p = queue.shift();
+      const r = sellTest({ squad, players, bank, priceOf, recency, out: p, tries: 3 });
+      setTests((t) => ({ ...t, [p.player_id]: { ...r, done: true } }));
+      setTimeout(step, 0);
+    };
+    const t = setTimeout(step, 60);
+    return () => { job.current++; clearTimeout(t); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [squad, players, bank, recency, full]);
 
-  // This week's moves with the manager's plan applied.
-  const plan = useMemo(() => (squad.length === 15
+  const rows = useMemo(() => {
+    if (!full) return [];
+    const xi = bestXI(squad, (p) => expectedPoints(p, recency));
+    // Regular starters per position, by projection, for the long-term ranking.
+    const pool = {};
+    for (const q of players) if ((q.start_prob ?? 0) >= 0.5) (pool[q.position] ??= []).push(expectedPoints(q, recency));
+    const pctOf = (p) => { const l = pool[p.position] ?? []; const x = expectedPoints(p, recency); return l.length ? l.filter((v) => v <= x).length / l.length : 0.5; };
+    return squad.map((p) => {
+      const test = tests[p.player_id];
+      const run = runs[p.team_id]?.[windows[0]];
+      const turn = runs[p.team_id] ? fixtureTurn(runs[p.team_id], windows) : null;
+      return { p, test, pending: !test?.done, xp: expectedPoints(p, recency), ...keepScore(p, { test, inXI: xi.has(p), run, turn, band, pct: pctOf(p) }) };
+    }).sort((a, b) => a.score - b.score || b.p.price - a.p.price);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [squad, players, recency, tests, runs, full]);
+
+  // This week's moves with the manager's Keep / Sell choices applied.
+  const plan = useMemo(() => (full
     ? transferPlan({ squad, players, bank, priceOf, recency, freeTransfers, ...userPlanOptions() }) : []),
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [squad, players, bank, priceOf, recency, freeTransfers, plans, patient]);
   const planMoves = plan.flatMap((it) => it.moves);
-  // Sales the manager marked for this week that the moves couldn't fit.
-  const unsold = squad.filter((p) => userPlanOptions().mustSell.has(p.player_id) && !planMoves.some((m) => m.out.player_id === p.player_id));
   const planHits = plan.reduce((t, it) => t + it.hits, 0);
-  const planGainShown = plan.reduce((t, it) => t + it.gain, 0) - (planHits * HIT_COST) / horizon();
+  const gain = plan.reduce((t, it) => t + it.gain, 0) - (planHits * HIT_COST) / horizon();
 
-  // International breaks ahead: deadlines far apart.
-  const breaks = useMemo(() => gws.slice(1).filter((g) => {
+  const breakGw = useMemo(() => gws.slice(1).find((g) => {
     const a = deadlines[g - 1], b = deadlines[g];
     return a && b && (new Date(b) - new Date(a)) / 864e5 >= BREAK_DAYS;
   }), [gws, deadlines]);
 
-  // The model's view, after this week's moves (with the manager's plan): who is
-  // being sold and for whom, who is held, and for everyone else the best swap
-  // and whether he starts in the squad those moves leave, with the money they
-  // leave. So holding or selling one player changes what the rest are told.
-  const rows = useMemo(() => {
-    if (squad.length !== 15) return [];
-    const { locked } = userPlanOptions();
-    const band = sigmaGain();
-    const selling = Object.fromEntries(planMoves.map((m) => [m.out.player_id, m]));
-    // Everyone else is judged in the squad the firm moves leave: the manager's own
-    // sales and clear upgrades, not optional swaps inside the margin of error.
-    const firm = plan.filter((it) => it.moves.some((m) => plans[m.out.player_id]) || it.gain >= band * it.moves.length)
-      .flatMap((it) => it.moves);
-    const after = squad.map((p) => firm.find((m) => m.out === p)?.in ?? p);
-    const left = bank - firm.reduce((t, m) => t + m.cost, 0);
-    const upgrades = Object.fromEntries(bestMoves({ squad: after, players, bank: left, priceOf, recency, locked })
-      .map((m) => [m.moves[0].out.player_id, { in: m.moves[0].in, gain: m.gain }]));
-    const xi = bestXI(after, (p) => expectedPoints(p, recency));
-    return squad.filter((p) => runs[p.team_id]).map((p) => {
-      const mine = plans[p.player_id];
-      const sale = selling[p.player_id];
-      if (sale) {
-        const to = `→ ${sale.in.player_name} (£${sale.in.price.toFixed(1)}m)`;
-        if (mine) return { p, o: { tone: "bad", label: "Selling (your plan)", due: nextGw, why: "your plan", text: `${to}, in this week's moves above.` } };
-        // The model's own move: worth flagging only if it adds more than its margin of error.
-        const item = plan.find((it) => it.moves.includes(sale));
-        const clear = item && item.gain >= band * item.moves.length;
-        return { p, o: clear
-          ? { tone: "warn", label: "Sell this week", due: nextGw, why: "clear upgrade", text: `${to}: +${item.gain.toFixed(1)} pts/GW, beyond the margin of error.` }
-          : { tone: "neutral", label: "Optional swap", why: "optional",
-            text: `${to} adds only +${(item?.gain ?? 0).toFixed(1)} pts/GW${item?.moves.length > 1 ? " with its paired move" : ""}, inside the margin of error (±${band.toFixed(1)}): keeping him is as good.` } };
-      }
-      if (userPlanOptions().mustSell.has(p.player_id)) {
-        return { p, o: {
-          tone: "warn", label: "To sell: no free transfer", due: nextGw, why: "your plan, not fitted",
-          text: "You marked him to sell this week, but the free transfers went on the other sales. See the note above.",
-        } };
-      }
-      const o = verdict(p, { upgrade: upgrades[p.player_id], inXI: xi.has(p), turn: fixtureTurn(runs[p.team_id], windows), nextGw, last, band });
-      if (locked.has(p.player_id)) {
-        const until = mine?.startsWith("gw") ? ` to GW${+mine.slice(2) - 1}` : "";
-        return { p, o: { ...o, tone: "good", label: `Holding${until} (your plan)`, due: mine?.startsWith("gw") ? +mine.slice(2) : null, why: "your plan" } };
-      }
-      return { p, o };
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [squad, players, bank, priceOf, recency, runs, windows, nextGw, last, plan, plans]);
+  const [open, setOpen] = useState(null);
+  const [view, setView] = useState("rank");
 
-  // When each planned or suggested move falls due, so transfers can be timed.
-  const timeline = useMemo(() => {
-    const due = {};
-    for (const { p, o } of rows) if (o.due) (due[o.due] ??= []).push({ p, why: o.why });
-    return Object.entries(due).map(([gw, list]) => ({ gw: +gw, list })).sort((a, b) => a.gw - b.gw);
-  }, [rows]);
-
-  if (squad.length !== 15) {
-    return <section className="card empty-card"><p>Pick or load a full squad of 15 to plan how long to hold each player.</p></section>;
+  if (!full) {
+    return <section className="card empty-card"><p>Pick or load a full squad of 15 to score who to keep and who to sell.</p></section>;
   }
 
-  const dueNow = timeline.find((t) => t.gw === nextGw)?.list.length ?? 0;
-  const byPos = POSITIONS.map((pos) => [pos, rows.filter((r) => r.p.position === pos)]);
+  const pending = rows.filter((r) => r.pending).length;
+  const sellNow = rows.filter((r) => r.score < 3);
+  const shown = view === "rank" ? rows : POSITIONS.flatMap((pos) => rows.filter((r) => r.p.position === pos));
 
   return (
     <div className="plan-page">
-      <section className="card plan-week">
-        <div className="card-head wrap">
-          <div>
-            <h2>This week's moves, with your plan</h2>
-            <p className="hint">Held players are never sold; players you mark to sell go first, and the money they free
-              goes where it scores most. {freeTransfers} free transfer{freeTransfers === 1 ? "" : "s"}{patient ? " · Patient" : ""}.</p>
-          </div>
+      <section className="card kp-head">
+        <div className="kp-week">
+          <span className="w-label">This week</span>
+          {planMoves.length ? (
+            <>
+              <ul className="plan-moves">
+                {planMoves.map((m) => (
+                  <li key={m.out.player_id}>
+                    <span className="pt-player"><Badge teamId={m.out.team_id} size={16} />{m.out.player_name}</span>
+                    <span className="arrow" aria-hidden>→</span>
+                    <span className="pt-player"><Badge teamId={m.in.team_id} size={16} />{m.in.player_name}</span>
+                    <small>£{m.in.price.toFixed(1)}m</small>
+                  </li>
+                ))}
+              </ul>
+              <p className="hint">{sgn(gain)} pts/GW over {horizon()} GWs{planHits ? ` after a −${planHits * HIT_COST} hit` : ""}
+                {gain < band ? `, inside the margin of error (±${band.toFixed(1)}): rolling is as good.` : "."}</p>
+            </>
+          ) : <p className="hint">{freeTransfers ? "No move worth a transfer: roll it." : "No free transfers left this week."}</p>}
           {planMoves.length > 0 && onApply && (
-            <button className="btn sm primary" onClick={() => { onApply(planMoves); window.location.hash = "#/transfers"; }}>Apply</button>
+            <button className="btn sm primary" onClick={() => { onApply(planMoves); window.location.hash = "#/transfers"; }}>Apply on Transfers</button>
           )}
         </div>
-        {planMoves.length ? (
-          <ul className="plan-moves">
-            {planMoves.map((m) => (
-              <li key={m.out.player_id}>
-                <span className="pt-player"><Badge teamId={m.out.team_id} size={16} />{m.out.player_name}</span>
-                <span className="arrow" aria-hidden>→</span>
-                <span className="pt-player"><Badge teamId={m.in.team_id} size={16} />{m.in.player_name}</span>
-                <small>£{m.in.price.toFixed(1)}m{plans[m.out.player_id] ? " · your plan" : ""}</small>
-              </li>
-            ))}
-            <li className="plan-total">
-              {Math.round(planGainShown * 10) >= 0 ? "+" : "−"}{Math.abs(planGainShown).toFixed(1)} pts/GW over the next {horizon()} GWs
-              {planHits ? ` after a −${planHits * HIT_COST} hit` : ""}
-            </li>
-          </ul>
-        ) : <p className="plan-note">{freeTransfers ? "No move worth a transfer: roll it." : "No free transfers left this week (moves already planned on Transfers)."}</p>}
-        {planMoves.length > 0 && !planMoves.some((m) => plans[m.out.player_id]) && planGainShown < sigmaGain() && (
-          <p className="plan-note">Small gain, inside the model's margin of error (±{sigmaGain().toFixed(1)} pts/GW): rolling the transfers is as good. Turn on <b>Patient</b> on Transfers to only see moves the model is sure of.</p>
-        )}
-        {unsold.length > 0 && (
-          <p className="plan-note warn-note">
-            Not sold this week: {unsold.map((p) => p.player_name).join(", ")}. {freeTransfers ? "There aren't enough free transfers for every sale you marked" : "No free transfers are left"}; a sale
-            you decided on never takes a −4 hit on its own. Add one on <a href="#/transfers">Transfers</a> if you want it, or move it to a later week.
+        <div className="kp-legend">
+          <span className="w-label">Keep score</span>
+          <div className="kp-scale"><i /><span>0 sell now</span><span>5</span><span>10 keep all season</span></div>
+          <p className="hint">
+            {sellNow.length ? <>Sell first: <b>{sellNow.map((r) => r.p.player_name).join(", ")}</b>. </> : "Nobody needs selling now. "}
+            Each score weighs the best replacement in his position (or cashing him in to upgrade elsewhere), how he ranks
+            long term, his fixtures and his fitness. Tap a player for the reasons; <b>Keep</b> or <b>Sell</b> steers Transfers.{breakGw ? <> International break before GW{breakGw}: non-urgent moves are best made after it.</> : null}
           </p>
-        )}
-      </section>
-
-      <section className="card plan-summary">
-        <div className="card-head wrap">
-          <div>
-            <h2>Transfer timeline</h2>
-            <p className="hint">Players ruled out or with a clear upgrade (this week), starters whose fixtures turn hard
-              (their club's next {w} games ranked in the hardest third of all 20 clubs, and still there {w - 1} weeks on), and the moves you've planned yourself.</p>
-          </div>
         </div>
-        {breaks.length > 0 && (
-          <p className="plan-note">
-            <b>International break before GW{breaks.join(", GW")}.</b> Injuries picked up on international duty
-            often aren't known until the week of the deadline, so a move that isn't urgent is usually better made
-            after the break, once team news is in.
-          </p>
-        )}
-        <p className="plan-note">
-          {dueNow
-            ? `${dueNow} player${dueNow > 1 ? "s" : ""} due a move this week (GW${nextGw}).`
-            : `Nothing due this week (GW${nextGw}): nobody is ruled out and no upgrade beats the model's margin of error, so rolling the transfer keeps it for when one does.`}
-        </p>
-        <ol className="plan-timeline">
-          {timeline.map(({ gw, list }) => (
-            <li key={gw} className={gw === nextGw ? "now" : ""}>
-              <span className="pt-gw">GW{gw}</span>
-              <span className="pt-who">
-                {list.map(({ p, why }) => (
-                  <span key={p.player_id} className="pt-player">
-                    <Badge teamId={p.team_id} size={16} />{p.player_name}<em>{why}</em>
-                  </span>
-                ))}
-              </span>
-            </li>
-          ))}
-          {!timeline.length && <li><span className="pt-who">No swings in the next {AHEAD} gameweeks: a settled squad.</span></li>}
-        </ol>
       </section>
 
       <section className="card">
         <div className="card-head wrap">
-          <div>
-            <h2>Each player</h2>
-            <p className="hint">The model's verdict (availability, the best swap at his price, his fixtures) and your own plan for him, saved in this browser.</p>
-          </div>
+          <h2>{view === "rank" ? "Sell priority, first to last" : "By position"}{pending > 0 && <small className="kp-busy"> · checking {pending} more…</small>}</h2>
+          <Segmented value={view} onChange={setView} options={[{ value: "rank", label: "Ranked" }, { value: "pos", label: "By position" }]} />
         </div>
-        <div className="table-scroll">
-          <table className="fx-table plan-table">
-            <thead>
-              <tr>
-                <th className="left">Player</th>
-                <th>xP/GW</th>
-                {gws.map((g) => <th key={g}>GW{g}</th>)}
-                <th className="left">Verdict</th>
-                <th className="left">Your plan</th>
-              </tr>
-            </thead>
-            <tbody>
-              {byPos.flatMap(([pos, list]) => list.map(({ p, o }, i) => (
-                <tr key={p.player_id} className={i === 0 ? "pos-first" : ""}>
-                  <td className="left">
-                    <span className="fx-club">
-                      <Badge teamId={p.team_id} size={22} />
-                      <span className="plan-name">
-                        <b>{p.player_name}</b>
-                        <small>{pos} · £{p.price.toFixed(1)}m{p.status && p.status !== "a" && <i className={`dot ${p.status === "d" ? "doubt" : "out"}`} title={p.news} />}</small>
-                      </span>
-                    </span>
-                  </td>
-                  <td>{expectedPoints(p, recency).toFixed(1)}</td>
-                  {gws.map((g) => {
-                    const fx = teams[p.team_id]?.fixtures.filter((f) => f.gw === g) ?? [];
-                    return (
-                      <td key={g}>
-                        <span className="fx-cell">{fx.length ? fx.map((f, k) => <FdrChip key={k} fx={f} compact />) : <span className="blank">–</span>}</span>
-                      </td>
-                    );
-                  })}
-                  <td className="left plan-say">
-                    <span className={`plan-tag ${o.tone}`}>{o.label}</span>
-                    <small>{o.text}</small>
-                  </td>
-                  <td className="left">
-                    <Dropdown value={plans[p.player_id] ?? ""} options={planOptions} align="right" floating
-                      onChange={(v) => setPlan(p.player_id, v)} />
-                  </td>
-                </tr>
-              )))}
-            </tbody>
-          </table>
-        </div>
+        <ol className="kp-list">
+          {shown.map((r, i) => (
+            <Row key={r.p.player_id} r={r} i={i} plan={plans[r.p.player_id]} setPlan={setPlan} nextGw={nextGw}
+              open={open === r.p.player_id} onToggle={() => setOpen(open === r.p.player_id ? null : r.p.player_id)} />
+          ))}
+        </ol>
       </section>
     </div>
   );

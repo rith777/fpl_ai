@@ -31,10 +31,10 @@ const Player = ({ p, sub }) => (
 const when = (d) => new Date(d).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 // The gameweek at a glance: deadline, the squad's projection, transfers and money.
-function Status({ clubs, nextGw, total, now, team, ftLeft, bank }) {
+function Status({ clubs, nextGw, total, now, team, ftLeft, bank, ring }) {
   const left = clubs.deadline ? new Date(clubs.deadline) - now : null;
   const tiles = [
-    [`GW${nextGw} deadline`, left == null ? "—" : left > 0 ? span(left) : "Passed", clubs.deadline && when(clubs.deadline)],
+    !ring && [`GW${nextGw} deadline`, left == null ? "—" : left > 0 ? span(left) : "Passed", clubs.deadline && when(clubs.deadline)],
     total != null && ["Your XI projects", total.toFixed(1), "pts, captain and autosubs included", "grad"],
     team && ["Free transfers", ftLeft, ftLeft === 1 ? "this week" : "to use or roll"],
     team && ["In the bank", `£${bank.toFixed(1)}m`, "after planned moves"],
@@ -83,6 +83,7 @@ function Transfer({ squad, players, bank, priceOf, recency, freeTransfers, made,
             </div>
           )))}
           <p className="tw-line"><b className="good">+{gain.toFixed(1)} pts/GW</b> over the next {horizon()} GWs{moves.length > 1 ? " for the plan" : ""}.
+            {" "}£{(bank - moves.reduce((t, m) => t + m.cost, 0)).toFixed(1)}m left in the bank.
             {roll?.close && <> Keeping the transfer for next week has been worth about as much (+{roll.keep.toFixed(1)} pts), so rolling is fine too.</>}</p>
         </>
       ) : (
@@ -98,8 +99,11 @@ function Transfer({ squad, players, bank, priceOf, recency, freeTransfers, made,
 }
 
 // Captain and vice by projection, and whether the bench order is the best one.
-function Lineup({ captain, vice, lineup, onBestXI, recency }) {
+function Lineup({ captain, vice, lineup, onBestXI, recency, squad }) {
   const better = lineup?.gain > 0;
+  const shortlist = useMemo(() => [...squad].sort((a, b) => adjPoints(b, recency) - adjPoints(a, recency)).slice(0, 3), [squad, recency]);
+  const top = shortlist[0] ? adjPoints(shortlist[0], recency) : 1;
+  const doubts = squad.filter((p) => p.status && p.status !== "a");
   return (
     <section className="card tw-card">
       <div className="card-head">
@@ -112,6 +116,14 @@ function Lineup({ captain, vice, lineup, onBestXI, recency }) {
           ? <>Start {lineup.ins.map((p) => p.player_name).join(", ")} over {lineup.outs.map((p) => p.player_name).join(", ")}.</>
           : better ? "Reorder your bench." : "Your XI and bench order are the best for this week."}
       </p>
+      <ul className="tw-armband" aria-label="Armband shortlist">
+        {shortlist.map((p, i) => (
+          <li key={p.player_id} style={{ "--w": `${(adjPoints(p, recency) / top) * 100}%`, "--i": i }}>
+            <span>{p.player_name}</span><i aria-hidden /><b>{adjPoints(p, recency).toFixed(1)}</b>
+          </li>
+        ))}
+      </ul>
+      {doubts.length > 0 && <p className="tw-doubt">Doubts: {doubts.map((p) => p.player_name).join(", ")}</p>}
       <div className="tw-actions">
         {better && <button className="btn sm primary" onClick={onBestXI}>Use best XI</button>}
         <a className="btn sm ghost" href="#/team">Pick team →</a>
@@ -270,7 +282,7 @@ export default function ThisWeek(props) {
   if (!ready && !team?.needsSquad) return <div className="tw-page"><Welcome {...props} now={now} /></div>;
   return (
     <div className="tw-page">
-      <Status clubs={clubs} nextGw={nextGw} total={ready ? total : null} now={now} team={team} ftLeft={ftLeft} bank={props.bank} />
+      <Status clubs={clubs} nextGw={nextGw} total={ready ? total : null} now={now} team={team} ftLeft={ftLeft} bank={props.bank} ring={ready} />
       {!ready ? (
         <section className="card tw-hero solo">
           <h2>One step left: add your squad</h2>
@@ -282,13 +294,13 @@ export default function ThisWeek(props) {
         <>
           <Heading>This week's calls</Heading>
           <div className="tw-calls">
-            <Lineup captain={captain} vice={vice} lineup={lineup} onBestXI={onBestXI} recency={recency} />
+            <Lineup captain={captain} vice={vice} lineup={lineup} onBestXI={onBestXI} recency={recency} squad={squad} />
             <Transfer {...props} />
             {team && <Chips squad={squad} used={team.chipsUsed} nextGw={nextGw} />}
           </div>
           <Heading>At a glance</Heading>
           <div className="wg-grid">
-            <DeadlineRing deadlines={clubs.deadlines} nextGw={nextGw} ftLeft={ftLeft} bank={props.bank} />
+            <DeadlineRing deadlines={clubs.deadlines} nextGw={nextGw} ftLeft={ftLeft} lineup={lineup} />
             <PointsRace squad={squad} recency={recency} />
             <CaptainDuel squad={squad} recency={recency} />
             <PriceRadar players={props.players} squad={squad} />

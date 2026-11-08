@@ -5,7 +5,7 @@ export const SQUAD_LIMITS = { GK: 2, DEF: 5, MID: 5, FWD: 3 }; // full 15-man sq
 export const SQUAD_SIZE = 15;
 export const MAX_PER_CLUB = 3;
 export const POSITIONS = ["GK", "DEF", "MID", "FWD"];
-export const POS_COLOR = { GK: "#ffd23f", DEF: "#04f5ff", MID: "#00ff87", FWD: "#ff2882" };
+export const POS_COLOR = { GK: "#ffc53d", DEF: "#5ab8ff", MID: "#3ddc97", FWD: "#ff5c7a" };
 export const POS_NAME = { GK: "Goalkeepers", DEF: "Defenders", MID: "Midfielders", FWD: "Forwards" };
 
 // Legal starting-XI shape: 1 GK plus these bounds; total outfield = 10.

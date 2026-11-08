@@ -486,7 +486,7 @@ export default function App() {
     transfers: ["My Team", gwLine],
     stats: ["Statistics", `${players.length} players · projections weighted ${recencyLabel(recency).toLowerCase()}`],
     fixtures: ["Fixtures", `Gameweeks ${nextGw}+ · ${clubs.teams.length} clubs`],
-    plan: ["Squad plan", "How long to hold each player, and when your transfers fall due"],
+    plan: ["Squad plan", "Every player scored 0 to 10: sell now or keep all season"],
     history: ["History", team ? `${team.name} · each move graded on what was known at the time` : "Your season, week by week"],
     strategy: ["Strategy", team ? `${team.name}'s moves vs the model's, scored on real points` : "What past seasons say works"],
     start: ["New to FPL", "How the game works, in plain words, and how to join"],
@@ -562,7 +562,7 @@ export default function App() {
     <TeamsContext.Provider value={teamsById}>
       <Header page={route} recency={recency} setRecency={setRecency} team={team} teamLoading={teamLoading}
         savedTeamId={savedTeamId} onLoad={loadTeam} onUnload={unloadTeam} recent={recent} />
-      <main className="page" key={route}>
+      <main className={`page ${route === "start" || route === "about" ? "reading" : ""}`} key={route}>
         {!welcome && <div className="page-head">
           <div>
             <h1>{heads[route][0]}{pageInfo?.beta && <Beta />}</h1>
