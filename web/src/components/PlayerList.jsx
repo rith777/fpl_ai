@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import {
-  POSITIONS, POS_COLOR, METRICS, SORT_KEYS, adjPoints, adjValue, avgMins, isNailed, NAILED_MINUTES,
+  POSITIONS, POS_COLOR, METRICS, banNote, banRisk, SORT_KEYS, adjPoints, adjValue, avgMins, isNailed, NAILED_MINUTES,
 } from "../lib.js";
 import { Dropdown, NextFixtures, Segmented, Shirt } from "./ui.jsx";
 
@@ -71,7 +71,7 @@ export default function PlayerList({ players, placedIds, recency, onPick, pos, s
             >
               <span className="prow-kit"><Shirt teamId={p.team_id} gk={p.position === "GK"} size={34} /></span>
               <span className="prow-name">
-                <b>{p.player_name}{p.status !== "a" && <i className={`dot ${p.status === "d" ? "doubt" : "out"}`} />}</b>
+                <b>{p.player_name}{p.status !== "a" && <i className={`dot ${p.status === "d" ? "doubt" : "out"}`} />}{banRisk(p) >= 0.1 && <i className="yc" title={banNote(p)} aria-label="Yellow-card ban risk" />}</b>
                 <small>{p.team} · {p.position}</small>
               </span>
               <span className="num muted">{p.price.toFixed(1)}</span>

@@ -7,7 +7,7 @@ import { Beta, useOutside } from "./ui.jsx";
 // not tools) sit apart at the end.
 export const PAGES = [
   { id: "home", label: "This week" },
-  { id: "team", label: "My Team", also: ["transfers"] },
+  { id: "team", label: "My Team", also: ["transfers", "formations"] },
   { id: "stats", label: "Statistics" },
   { id: "fixtures", label: "Fixtures" },
   { id: "plan", label: "Squad plan", beta: true },

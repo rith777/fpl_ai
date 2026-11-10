@@ -6,6 +6,55 @@ const REPO = "https://github.com/rith777/fpl_ai";
 // Who built the app, how it works, and the long explanations the other pages
 // link to (#/about/<section>). Numbers come from the latest backtest and
 // calibration where the app has them.
+// The decision rules, in plain words, for "How every decision is made".
+const LOGIC = (H, band) => [
+  ["Expected points", "Every page", [
+    <>Two models per player and fixture: the chance he plays (minutes, rotation, FPL's injury flags and return dates) and his points if he does (his xG and xA, both clubs' strength, home or away, bookmaker odds).</>,
+    <>Expected points = chance of playing × points if he plays, for each of the next <b>{H}</b> gameweeks. A blank counts 0, a double counts both games.</>,
+    <>The <b>Projection</b> slider at the top blends the model with recent form. Season (left) is the model as tested; further right trusts the last few games more, which is noisier.</>,
+  ]],
+  ["Yellow-card bans", "Every page", [
+    <>Premier League rule: <b>5</b> yellows by a club's 19th game is a 1-match ban, <b>10</b> by the 32nd is 2 matches, <b>15</b> is 3.</>,
+    <>A player one or two bookings short gets his own booking rate per game. The chance he's booked before the deadline for a threshold comes off his chance of playing in the game(s) after.</>,
+    <>Flagged with a yellow card mark in the player list and in the Squad plan and This week.</>,
+  ]],
+  ["Captain and vice", "This week, My Team", [
+    <>Captain: the most expected points in your XI next gameweek (doubled). Vice: the second most.</>,
+    <>Captain duel on This week compares any two side by side.</>,
+  ]],
+  ["Best XI and bench order", "My Team", [
+    <>Every legal formation and bench order is tried; the pick scores most next gameweek with autosubs counted (a sub comes on, in bench order, when a starter's chance of playing says he'll miss).</>,
+    <>"Use best XI" shows up when your lineup leaves points on the bench.</>,
+  ]],
+  ["Transfer plans", "My Team → Transfers", [
+    <>Each move is scored as the change in your best XI's expected points per gameweek over the next <b>{H}</b>, after the swap: not the player's points alone, so a bench upgrade is worth little.</>,
+    <>Two routes are compared: the best single moves one at a time, and a pair chosen together (one sale funding a better buy). The tabs show the best plan for each number of moves, including ones that lose points.</>,
+    <>A <b>−4</b> hit is only taken if the move earns it back: its gain over {H} gameweeks has to beat 4 points.</>,
+    <>Fewer transfers win ties: extra moves that add only +0.1 pts/GW per transfer, or less, are dropped and the transfer is kept.</>,
+    <>Margin of error: about <b>±{band.toFixed(1)}</b> pts/GW per move. Moves inside it are flagged; <b>Patient</b> mode only uses a transfer on a move beyond it.</>,
+    <>Your Squad plan steers it: players you set to Keep are never sold, players set to Sell go first.</>,
+  ]],
+  ["Keep score (0 to 10)", "Squad plan", [
+    <>Starts at 6. The best way to sell him (a straight swap, or cashing him in to upgrade someone else) moves it: a gain of one margin of error per transfer takes it to 2, a loss pushes it up.</>,
+    <>Then: top 3% of his position +1.5, top 10% +0.75, a below-average starter −0.75; kind fixtures +1, a hard run −0.5 to −1.5; a doubt −1.5, ruled out caps it at 0.5; ban risk −0.5 to −1.</>,
+    <>Cheap bench cover (£4.6m or less, not in your XI, fit) never scores below 6.5: not worth a transfer.</>,
+  ]],
+  ["Formations and a cheap bench", "My Team → Formations", [
+    <>For each of the 8 legal formations: the bench is bought as cheaply as possible (outfield subs must still play enough to cover; the spare keeper doesn't need to), and every other £ goes on the best XI.</>,
+    <>"Where your money buys points" shows the best regular you can buy at each price per position; a steep line means money there buys a lot.</>,
+  ]],
+  ["Chips", "This week, Transfers", [
+    <>Each chip is valued for each gameweek in view: Bench Boost by your bench's points beyond what autosubs would bring anyway, Triple Captain by your captain's points, Free Hit by how weak your XI's week is (blanks and tough fixtures are where it helps most).</>,
+    <>Play or hold follows a timing rule tested on past seasons: hold while a clearly better week is coming before the chip expires.</>,
+  ]],
+  ["Transfer timing and international breaks", "Squad plan", [
+    <>A gap of 12+ days between deadlines is an international break: injuries from it often aren't known until the week of the deadline, so a move that isn't urgent is usually better made after it.</>,
+  ]],
+  ["Price changes", "This week", [
+    <>The price radar uses a model fitted on past seasons' net transfers and ownership to give each player's chance of a rise or fall before the deadline.</>,
+  ]],
+];
+
 export default function About() {
   const m = model(), s = m.strategy;
   const app = s?.strategies?.find((r) => r.horizon === s.app.horizon && r.minGain === s.app.minGain);
@@ -61,6 +110,17 @@ export default function About() {
             real points. A rule replaces the current one only if it wins on a season it wasn't chosen on, by more than
             its standard error, in every season tested.</p>
         </section>
+      </div>
+
+      <h2 className="about-h" id="logic">How every decision is made</h2>
+      <p className="about-sub">Tap a decision for the rules behind it. Numbers in <b>bold</b> are the live settings.</p>
+      <div className="logic-list">
+        {LOGIC(H, band).map(([title, where, points]) => (
+          <details key={title} className="card logic">
+            <summary><b>{title}</b><small>{where}</small></summary>
+            <ul>{points.map((t, i) => <li key={i}>{t}</li>)}</ul>
+          </details>
+        ))}
       </div>
 
       <h2 className="about-h">Reading the pages</h2>

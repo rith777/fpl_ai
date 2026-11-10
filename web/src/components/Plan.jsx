@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Dropdown, NextFixtures, Segmented, TeamsContext } from "./ui.jsx";
 import { HIT_COST, bestXI, expectedPoints, horizon, sellTest, sigmaGain, transferPlan, unavailable, userPlanOptions } from "../transfers.js";
-import { POSITIONS } from "../lib.js";
+import { POSITIONS, banNote, banRisk } from "../lib.js";
 
 // How far ahead the plan looks, in gameweeks.
 const AHEAD = 8;
@@ -87,6 +87,7 @@ function keepScore(p, { test, inXI, run, turn, band, pct }) {
   if (unavailable(p)) { score = Math.min(score, 0.5); reasons.unshift({ k: -2, t: p.news || "Ruled out" }); }
   else if (p.status === "d") { score -= 1.5; reasons.unshift({ k: -1, t: p.news || "A doubt" }); }
   else if ((p.start_prob ?? 1) < 0.5 && inXI) { score -= 1; reasons.push({ k: -1, t: `Starts only ${Math.round((p.start_prob ?? 0) * 100)}% of games` }); }
+  if (banRisk(p) >= 0.1) { score -= banRisk(p) >= 0.25 ? 1 : 0.5; reasons.push({ k: -1, t: banNote(p) }); }
   if (!inXI && p.price <= FODDER && (!p.status || p.status === "a")) { score = Math.max(score, 6.5); reasons.push({ k: 1, t: "Cheap bench cover: not worth a transfer" }); }
   return { score: clamp(score), reasons: reasons.sort((a, b) => Math.abs(b.k) - Math.abs(a.k)) };
 }

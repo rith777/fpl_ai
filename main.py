@@ -184,6 +184,58 @@ def _availability(player: pd.Series, kickoffs: list, season_start_year: int) -> 
     return [1.0 if pd.notna(k) and pd.Timestamp(k) >= back_at else 0.0 for k in kickoffs]
 
 
+# Premier League disciplinary rule for yellow cards in league games: this many
+# bookings by the club's Nth league match bans a player for that many games.
+# Gameweeks stand in for the club's match count (postponements aside).
+YELLOW_BANS = [(5, 19, 1), (10, 32, 2), (15, 38, 3)]  # (yellows, by match, games banned)
+
+
+def _next_ban(yellows: int, gw: int):
+    """The next yellow-card threshold still open to him at ``gw``, if any."""
+    return next(((n, by, games) for n, by, games in YELLOW_BANS if yellows < n and gw <= by), None)
+
+
+def _ban_risk(rows: pd.DataFrame, df: pd.DataFrame) -> tuple[pd.Series, dict]:
+    """Chance each player misses each upcoming fixture to a yellow-card ban.
+    A player one or two bookings short of a threshold can pick them up in the
+    fixtures before it closes (a booking per game at his own shrunk rate, when
+    he plays) and then sits out the next one(s). Returns that chance per row
+    of ``rows`` and, per player at risk, ``{yellows, limit, by, risk}`` where
+    ``risk`` is the chance he's banned for a game inside the horizon."""
+    rate = dict(zip(df["player_id"], _eb_per90(df["yellow_cards"], df["minutes"], df["position"])))
+    yellows = dict(zip(df["player_id"], df["yellow_cards"].fillna(0).astype(int)))
+    share = dict(zip(df["player_id"], (df["minutes"] / df["starts"].clip(lower=1) / 90).clip(0, 1).fillna(0)))
+    out = pd.Series(0.0, index=rows.index)
+    info = {}
+    for pid, grp in rows.sort_values("kickoff").groupby("player_id"):
+        y = yellows.get(pid, 0)
+        ban = _next_ban(y, int(grp["event"].iloc[0]))
+        if not ban or ban[0] - y > 2:  # too far from a ban to matter in the horizon
+            continue
+        limit, by, games = ban
+        need = limit - y
+        book = 1 - np.exp(-(rate.get(pid) or 0) * share.get(pid, 0))
+        dist = np.zeros(need + 1)
+        dist[0] = 1.0                      # bookings picked up so far (need = reached)
+        reached = []                       # chance he reaches the limit in fixture i
+        for i, (idx, r) in enumerate(grp.iterrows()):
+            banned = sum(reached[max(0, i - games):i])
+            out[idx] = banned
+            if r["event"] > by:
+                reached.append(0.0)
+                continue
+            b = book * r["p_play"] * (1 - banned)
+            step = dist[need - 1] * b
+            dist[1:need] = dist[1:need] * (1 - b) + dist[0:need - 1] * b
+            dist[0] *= 1 - b
+            dist[need] += step
+            reached.append(step)
+        risk = float(sum(out[grp.index]))
+        if risk >= 0.01:
+            info[pid] = {"yellows": y, "limit": limit, "by": by, "games": games, "risk": round(risk, 2)}
+    return out, info
+
+
 def _horizon_gws(api) -> list:
     """The next HORIZON gameweeks with fixtures."""
     return [int(e) for e in sorted(api.upcoming_fixtures(next_n=HORIZON * 2)["event"].unique())[:HORIZON]]
@@ -259,6 +311,8 @@ def _score_players(players: pd.DataFrame, api, predictor, refresh: bool = True) 
     for pid, grp in rows.sort_values("kickoff").groupby("player_id"):
         avail.update(zip(grp.index, _availability(by_id.loc[pid], list(grp["kickoff"]), season_year)))
     rows["p_play"] = pd.Series(avail) * rows["p_usage"]
+    banned, bans = _ban_risk(rows, df)
+    rows["p_play"] *= 1 - banned
     rows["xp"] = rows["p_play"] * rows["pts_if_play"]
 
     first_gw = gws[0] if gws else None
@@ -281,6 +335,7 @@ def _score_players(players: pd.DataFrame, api, predictor, refresh: bool = True) 
     by_gw = rows.pivot_table(index="player_id", columns="event", values="xp", aggfunc="sum").reindex(columns=gws)
     df["xp_gw"] = df["player_id"].map(lambda pid: [round(float(v), 2) for v in by_gw.loc[pid].fillna(0)]
                                       if pid in by_gw.index else [0.0] * len(gws))
+    df["ban"] = df["player_id"].map(bans)
     scoring = api.scoring()
     df = _display_stats(df, latest, strength, scoring, rows, first_gw)
     df = _track_record(df, feats, scoring)
@@ -581,7 +636,7 @@ EXPORT_COLUMNS = [
     "points_per_game", "selected_by_percent", "xgi_per_90",
     "xg_per_90", "xa_per_90", "on_pens", "on_fks", "on_corners", "status", "news", "cost_change_start",
     "goals_scored", "assists", "clean_sheets", "bonus", "net_transfers", "price_change", "rise_chance", "fall_chance",
-    "xp_gw", "rules_next", "rules_h", "recent_xp", "missed_gws", "last_season_pts",
+    "xp_gw", "rules_next", "rules_h", "recent_xp", "missed_gws", "last_season_pts", "yellow_cards", "ban",
 ]
 
 

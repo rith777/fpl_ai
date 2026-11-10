@@ -503,8 +503,8 @@ export default function TransfersPanel({
               const hit = items && items.reduce((t, it) => t + it.hits, 0) * HIT_COST;
               return items && (
                 <button key={k} className={`${view === k + 1 ? "on" : ""} ${gainOf(items) <= 0 ? "neg" : ""}`} onClick={() => setSize(k + 1)}>
-                  <b>{k + 1} move{k ? "s" : ""}{hit > 0 && <em className="hit">−{hit}</em>}</b>
-                  <small>{signed(gainOf(items))} pts/GW{k + 1 === pick ? " · model's pick" : ""}</small>
+                  <b>{k + 1} move{k ? "s" : ""}{hit > 0 && <em className="hit" title={`${hit / HIT_COST} transfer${hit > HIT_COST ? "s" : ""} past your free ones: −${hit} pts`}>−{hit}</em>}</b>
+                  <small>{signed(gainOf(items))} pts/GW{hit > 0 ? " after the hit" : ""}{k + 1 === pick ? " · model's pick" : ""}</small>
                 </button>
               );
             })}
