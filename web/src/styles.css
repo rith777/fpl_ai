@@ -1446,3 +1446,29 @@ i.yc { display: inline-block; width: 8px; height: 11px; margin-left: 6px; border
 .logic ul { margin: 0; padding: 0 18px 14px 32px; display: flex; flex-direction: column; gap: 7px; animation: fadeUp 0.3s var(--ease) both; }
 .logic li { font-size: 13.5px; }
 @media (max-width: 760px) { .logic-list { grid-template-columns: minmax(0, 1fr); } }
+
+/* Squad vs the value curve */
+.cc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cc-row { display: grid; grid-template-columns: minmax(180px, 260px) 150px minmax(0, 1fr); gap: 14px; align-items: center; padding: 10px 12px;
+  border-radius: 12px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.025); animation: fadeUp 0.4s var(--ease) both; animation-delay: calc(var(--i) * 40ms); }
+.cc-who { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.cc-who > span { display: flex; flex-direction: column; min-width: 0; }
+.cc-who b { font-size: 14px; }
+.cc-who small { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-gap { display: grid; grid-template-columns: minmax(0, 1fr) 40px; gap: 8px; align-items: center; }
+.cc-track { height: 7px; border-radius: 5px; background: rgba(255, 255, 255, 0.06); overflow: hidden; }
+.cc-track i { display: block; height: 100%; width: calc(var(--g) * 100%); background: var(--pos); border-radius: 5px; transform-origin: left; animation: growX 0.8s var(--ease) both; animation-delay: calc(var(--i) * 40ms + 120ms); }
+.cc-gap b { font-family: "Space Grotesk", sans-serif; text-align: right; }
+.cc-say { font-size: 13px; color: var(--text); display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.cc-say small { flex-basis: 100%; color: var(--muted); font-size: 12px; }
+.cc-tag { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 7px; border-radius: 999px; }
+.cc-tag.on { background: rgba(198, 255, 61, 0.14); color: var(--green); }
+.cc-tag.keep { background: rgba(255, 255, 255, 0.08); color: var(--muted); }
+.cc-tag.save { background: rgba(90, 184, 255, 0.15); color: var(--cyan); }
+.cc-tag.maybe { background: rgba(255, 197, 61, 0.14); color: var(--amber); }
+.cc-tag.move { background: rgba(255, 92, 122, 0.16); color: var(--red); }
+.cc .btn.block { margin-top: 10px; }
+@media (max-width: 760px) {
+  .cc-row { grid-template-columns: minmax(0, 1fr) 110px; }
+  .cc-say { grid-column: 1 / -1; }
+}

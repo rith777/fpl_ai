@@ -543,7 +543,7 @@ export default function App() {
   } else if (route === "formations") {
     page = <Formations players={players} recency={recency} budget={budget} squad={squad} teamLoaded={!!team} onUse={applyBlueprint} />;
   } else if (route === "stats") {
-    page = <Stats players={players} recency={recency} placedIds={placedIds} onPick={togglePick} />;
+    page = <Stats players={players} recency={recency} placedIds={placedIds} onPick={togglePick} squad={squad} bank={budget - spent} priceOf={priceOf} />;
   } else if (route === "fixtures") {
     page = <Fixtures currentGw={clubs.current_gw} squad={squad} />;
   } else if (route === "plan") {
