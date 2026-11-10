@@ -415,10 +415,30 @@ export function transferPlan({
   // A plan that drops a sale the manager decided on loses to one that makes it.
   const decidedIds = squad.filter((p) => mustSell?.has(p.player_id)).map((p) => p.player_id);
   const covers = (items) => decidedIds.filter((id) => items.some((it) => it.moves.some((m) => m.out.player_id === id))).length;
+  // Same gain: fewer transfers first (a transfer kept is worth something), then the cheaper.
+  const size = (items) => items.reduce((t, it) => t + it.moves.length, 0);
   const better = covers(opened) !== covers(plain) ? covers(opened) > covers(plain)
-    : sameGain(net(opened), net(plain)) ? planCost(opened) < planCost(plain) : net(opened) > net(plain);
+    : sameGain(net(opened), net(plain)) ? (size(opened) !== size(plain) ? size(opened) < size(plain) : planCost(opened) < planCost(plain))
+    : net(opened) > net(plain);
   const plan = (covers(opened) > covers(plain) || net(opened.slice(0, 1)) > 2 * barFor(ctx, pair)) && better ? opened : plain;
-  return freeTransfers >= squad.length ? rebuilt(ctx, plan, bank) : plan;
+  return freeTransfers >= squad.length ? rebuilt(ctx, plan, bank) : trimTies(ctx, plan);
+}
+
+// "Same returns, fewer transfers": the shortest start of the plan that the
+// rest adds no more than +0.1 pts/GW per extra transfer to (gains show to one
+// decimal, so +0.1 is the smallest difference you'd see). The transfers saved
+// are kept for a week they're worth more. Sales the manager decided on are
+// never dropped.
+export const TIE = 0.1;
+function trimTies(ctx, plan) {
+  const worth = (items) => shown(planGain(items));
+  for (let k = 0; k < plan.length; k++) {
+    const tail = plan.slice(k);
+    if (tail.some((it) => decided(ctx, it))) continue;
+    const extra = tail.reduce((t, it) => t + it.moves.length, 0);
+    if (worth(plan) - worth(plan.slice(0, k)) <= shown(TIE) * extra) return plan.slice(0, k);
+  }
+  return plan;
 }
 
 // The best plan for each number of moves from 1 to `upTo`, free up to

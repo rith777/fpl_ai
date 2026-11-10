@@ -58,3 +58,20 @@ def test_odds_download_creates_season_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(pd, "read_csv", lambda *a, **k: match)
     assert HistoricalDataCollector.download_odds("2022-23", tmp_path) == 1
     assert (tmp_path / "2022-23" / "odds.csv").exists()
+
+
+def test_yellow_card_ban_risk():
+    """On 4 yellows before match 19 he can be booked and miss the next game;
+    on 2 yellows, or once the 5-yellow window has closed, he can't."""
+    df = pd.DataFrame({"player_id": [1, 2, 3], "position": ["MID"] * 3, "yellow_cards": [4, 2, 4],
+                       "minutes": [900, 900, 1900], "starts": [10, 10, 21]})
+    fixtures = [(10, "2026-11-21"), (11, "2026-11-28"), (12, "2026-12-05")]
+    rows = pd.DataFrame([{"player_id": pid, "event": gw if pid != 3 else gw + 10, "kickoff": k, "p_play": 1.0}
+                         for pid in (1, 2, 3) for gw, k in fixtures])
+    banned, info = main._ban_risk(rows, df)
+    first = rows.index[(rows["player_id"] == 1)]
+    assert banned[first[0]] == 0                     # can't be banned before he's booked
+    assert 0 < banned[first[1]] < 1 and banned[first[2]] > 0
+    assert info[1]["limit"] == 5 and info[1]["risk"] > 0.1
+    assert 2 not in info                             # three bookings short: out of reach
+    assert 3 not in info                             # GW20+: the 5-yellow window has closed, 10 is far

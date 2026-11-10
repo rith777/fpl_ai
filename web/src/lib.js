@@ -105,3 +105,14 @@ export const METRICS = {
 export const SORT_KEYS = ["points", "horizon", "value", "form", "xgi", "start_prob", "if_play", "price", "selected", "total"];
 // Numeric metrics offered as scatter axes.
 export const AXIS_KEYS = Object.keys(METRICS);
+
+// Yellow-card ban risk from the export: { yellows, limit, by, games, risk },
+// risk = chance he's banned for a game in the next few gameweeks.
+export const banRisk = (p) => p.ban?.risk ?? 0;
+export function banNote(p) {
+  const b = p.ban;
+  if (!b) return null;
+  const short = b.limit - b.yellows;
+  return `${b.yellows} yellow${b.yellows === 1 ? "" : "s"}: ${short === 1 ? "one booking" : `${short} bookings`} from a ${b.games}-match ban `
+    + `(${b.limit} by GW${b.by}), ${Math.round(b.risk * 100)}% chance he misses a game to it soon`;
+}

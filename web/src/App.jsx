@@ -9,6 +9,7 @@ import PlayerList from "./components/PlayerList.jsx";
 import Summary from "./components/Summary.jsx";
 import Stats from "./components/Stats.jsx";
 import Fixtures from "./components/Fixtures.jsx";
+import Formations from "./components/Formations.jsx";
 import Plan from "./components/Plan.jsx";
 import History from "./components/History.jsx";
 import Strategy from "./components/Strategy.jsx";
@@ -394,6 +395,18 @@ export default function App() {
     setAutoRecency(recency);
   }
 
+  // A formation blueprint as the squad: XI and bench order as built. With a
+  // real team loaded the changes show as planned transfers (a Wildcard's worth).
+  function applyBlueprint(b) {
+    setStarters(b.xi.map((p) => p.player_id));
+    setBench(b.bench.map((p) => p.player_id));
+    setCaptainId(b.captain.player_id);
+    setAutoIds(new Set());
+    setAutoRecency(null);
+    flash(team ? `${b.shape.join("-")} blueprint planned: review it on Transfers` : `${b.shape.join("-")} blueprint loaded`);
+    window.location.hash = team ? "#/transfers" : "#/team";
+  }
+
   function clearSquad() {
     setStarters([]); setBench([]); setCaptainId(null); setAutoIds(new Set()); setAutoRecency(null);
   }
@@ -484,6 +497,7 @@ export default function App() {
     home: ["This week", gwLine],
     team: ["My Team", gwLine],
     transfers: ["My Team", gwLine],
+    formations: ["My Team", "Formations: where to spend, and a cheap bench for each shape"],
     stats: ["Statistics", `${players.length} players · projections weighted ${recencyLabel(recency).toLowerCase()}`],
     fixtures: ["Fixtures", `Gameweeks ${nextGw}+ · ${clubs.teams.length} clubs`],
     plan: ["Squad plan", "Every player scored 0 to 10: sell now or keep all season"],
@@ -526,6 +540,8 @@ export default function App() {
         </aside>
       </div>
     );
+  } else if (route === "formations") {
+    page = <Formations players={players} recency={recency} budget={budget} squad={squad} teamLoaded={!!team} onUse={applyBlueprint} />;
   } else if (route === "stats") {
     page = <Stats players={players} recency={recency} placedIds={placedIds} onPick={togglePick} />;
   } else if (route === "fixtures") {
@@ -568,9 +584,9 @@ export default function App() {
             <h1>{heads[route][0]}{pageInfo?.beta && <Beta />}</h1>
             <p>{heads[route][1]}</p>
           </div>
-          {(route === "team" || route === "transfers") && (
+          {(route === "team" || route === "transfers" || route === "formations") && (
             <Segmented value={route} onChange={(v) => { window.location.hash = `#/${v}`; }}
-              options={[{ value: "team", label: "Pick team" }, { value: "transfers", label: "Transfers" }]} />
+              options={[{ value: "team", label: "Pick team" }, { value: "transfers", label: "Transfers" }, { value: "formations", label: "Formations" }]} />
           )}
         </div>}
         {page}

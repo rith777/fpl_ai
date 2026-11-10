@@ -1,5 +1,5 @@
 import React from "react";
-import { POS_COLOR, METRICS, adjPoints, adjValue, avgMins } from "../lib.js";
+import { POS_COLOR, METRICS, adjPoints, adjValue, avgMins, banNote } from "../lib.js";
 import { sources } from "../rules.js";
 import { model } from "../transfers.js";
 import { NextFixtures, Shirt } from "./ui.jsx";
@@ -75,6 +75,7 @@ export default function PlayerDetail({ player: p, recency, owned }) {
         </div>
       </div>
       {p.status !== "a" && p.news && <div className={`pd-news ${p.status === "d" ? "doubt" : "out"}`}>{p.news}</div>}
+      {banNote(p) && <div className="pd-news ban">🟨 {banNote(p)}</div>}
       <dl className="pd-grid">
         {stats.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
       </dl>
