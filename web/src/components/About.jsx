@@ -47,6 +47,8 @@ const LOGIC = (H, band) => [
     <>Each position's value curve is the most expected points any regular starter gives for his price. Your players are ranked by how far below it they sit.</>,
     <>For each, the best swap to a player closer to the curve that you can afford is scored by what it adds to your best XI, so a bench player far below the curve is usually fine as cover.</>,
     <>Switch: the swap beats the margin of error. Optional: it adds points, but inside the margin. Save money: as good in your XI and cheaper.</>,
+    <>Gradient: the curve's slope over the £1.5m below his price, in extra pts/GW per £1m. Flat (+0.05 or less) means a cheaper player gives as much there.</>,
+    <>Downgrade: a cheaper player on the curve in his place, with the money freed spent on the best upgrade elsewhere. Shown when the two moves together beat the best straight swap.</>,
   ]],
   ["Chips", "This week, Transfers", [
     <>Each chip is valued for each gameweek in view: Bench Boost by your bench's points beyond what autosubs would bring anyway, Triple Captain by your captain's points, Free Hit by how weak your XI's week is (blanks and tough fixtures are where it helps most).</>,

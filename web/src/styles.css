@@ -1472,3 +1472,7 @@ i.yc { display: inline-block; width: 8px; height: 11px; margin-left: 6px; border
   .cc-row { grid-template-columns: minmax(0, 1fr) 110px; }
   .cc-say { grid-column: 1 / -1; }
 }
+.cc-slope { color: var(--muted); }
+.cc-slope.flat { color: var(--cyan); }
+.cc-tag.down { background: rgba(90, 184, 255, 0.15); color: var(--cyan); }
+.cc .hint b { color: var(--text); }
