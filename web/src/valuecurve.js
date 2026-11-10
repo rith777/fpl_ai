@@ -1,5 +1,5 @@
 import { MAX_PER_CLUB, adjPoints } from "./lib.js";
-import { bestXI, model, squadGain } from "./transfers.js";
+import { bestMoves, bestXI, model, squadGain } from "./transfers.js";
 
 // The value curve for one position: the most points anyone gives for the money.
 // It's the upper edge (concave hull) of price against points, from the player
@@ -42,6 +42,8 @@ export function valueCurve(rows) {
 
 export const REGULAR = 0.5;
 export const ON = 0.1;      // this close to the curve counts as on it
+export const FLAT = 0.05;   // pts/GW per £1m: a gradient this low means money buys nothing there
+const STEP = 1.5;           // the gradient is measured over the £1.5m below his price
 const CLOSER = 0.2;
 
 export function curveCheck({ squad, players, bank, priceOf, recency }) {
@@ -67,6 +69,30 @@ export function curveCheck({ squad, players, bank, priceOf, recency }) {
     const best = options.reduce((a, b) => (!a || b.gain > a.gain + 1e-9 || (Math.abs(b.gain - a.gain) < 1e-9 && b.freed > a.freed) ? b : a), null);
     // The cheapest that's at least as good in your XI: same points, money freed.
     const thrifty = options.filter((o) => o.gain >= -0.05 && o.freed > 0.05).sort((a, b) => b.freed - a.freed)[0] ?? null;
-    return { p: out, xp: pts(out), curveAt: c.at(out.price), gap, best, thrifty, margin, inXI: xi.has(out) };
+    // The curve's gradient just below his price: what each £1m of his price buys.
+    // (At the cheap end, where there's nothing below, the £1.5m above.)
+    const lo = Math.max(c.hull[0].x, out.price - STEP);
+    const slope = out.price - lo > 0.05 ? (c.at(out.price) - c.at(lo)) / (out.price - lo)
+      : (c.at(out.price + STEP) - c.at(out.price)) / STEP;
+    return { p: out, xp: pts(out), curveAt: c.at(out.price), gap, best, thrifty, margin, inXI: xi.has(out), slope,
+      downgrades: options.filter((o) => o.freed >= 1 - 1e-9).sort((a, b) => b.gain - a.gain).slice(0, 4) };
   }).filter(Boolean).sort((a, b) => b.gap - a.gap);
+}
+
+// Downgrade and reinvest: swap him for a cheaper player on (or near) the curve
+// and spend what that frees on the best upgrade elsewhere in the squad. Two
+// transfers; the gain is the whole squad's best XI, per GW over the horizon.
+// A few hundred ms: run on demand / in the background.
+export function downgradeTest({ squad, players, bank, priceOf, recency, row }) {
+  let best = null;
+  for (const d of row.downgrades) {
+    const first = { out: row.p, in: d.p, cost: d.p.price - priceOf(row.p) };
+    const sq = squad.map((q) => (q === row.p ? d.p : q));
+    const next = bestMoves({ squad: sq, players: players.filter((q) => q !== d.p && q.player_id !== row.p.player_id),
+      bank: bank - first.cost, priceOf, recency, locked: new Set([d.p.player_id]) })[0];
+    const after = next ? sq.map((q) => (q === next.moves[0].out ? next.moves[0].in : q)) : sq;
+    const gain = squadGain(squad, after, recency);
+    if (!best || gain > best.gain) best = { gain, moves: next ? [first, ...next.moves] : [first], freed: -first.cost };
+  }
+  return best;
 }
