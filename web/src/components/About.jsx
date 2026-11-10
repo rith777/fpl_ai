@@ -43,6 +43,11 @@ const LOGIC = (H, band) => [
     <>For each of the 8 legal formations: the bench is bought as cheaply as possible (outfield subs must still play enough to cover; the spare keeper doesn't need to), and every other £ goes on the best XI.</>,
     <>"Where your money buys points" shows the best regular you can buy at each price per position; a steep line means money there buys a lot.</>,
   ]],
+  ["Your squad vs the value curve", "Statistics", [
+    <>Each position's value curve is the most expected points any regular starter gives for his price. Your players are ranked by how far below it they sit.</>,
+    <>For each, the best swap to a player closer to the curve that you can afford is scored by what it adds to your best XI, so a bench player far below the curve is usually fine as cover.</>,
+    <>Switch: the swap beats the margin of error. Optional: it adds points, but inside the margin. Save money: as good in your XI and cheaper.</>,
+  ]],
   ["Chips", "This week, Transfers", [
     <>Each chip is valued for each gameweek in view: Bench Boost by your bench's points beyond what autosubs would bring anyway, Triple Captain by your captain's points, Free Hit by how weak your XI's week is (blanks and tough fixtures are where it helps most).</>,
     <>Play or hold follows a timing rule tested on past seasons: hold while a clearly better week is coming before the chip expires.</>,

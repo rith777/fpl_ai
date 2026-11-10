@@ -4,6 +4,8 @@ import { METRICS, AXIS_KEYS, POSITIONS, POS_COLOR, POS_NAME, adjPoints, fairShar
 import { model } from "../transfers.js";
 import { Badge, Beta, Dropdown, More, NextFixtures, Segmented, Shirt, TeamsContext } from "./ui.jsx";
 import Insights from "./Insights.jsx";
+import CurveCheck from "./CurveCheck.jsx";
+import { valueCurve } from "../valuecurve.js";
 
 // Round tick values (1, 2, 2.5 or 5 × a power of ten apart), about n across the range.
 function ticks(min, max, n = 6) {
@@ -16,37 +18,6 @@ function ticks(min, max, n = 6) {
 const AXIS_OPTIONS = AXIS_KEYS.map((k) => ({ value: k, label: METRICS[k].label }));
 const POINTS_KEYS = ["points", "horizon"]; // the value curve's Y: expected points
 const VALUE_LIST = 8; // rows shown per position before "show all"
-
-// The value curve for one position: the most points anyone gives for the money.
-// It's the upper edge (concave hull) of price against points, from the player
-// with the most points per £m on (cheaper ones on the edge give fewer points
-// *and* fewer per £m); below his price the edge is the line from £0 through
-// him. It bends like a log curve because the data does. `gap`: how many points
-// a player sits below it.
-function valueCurve(rows) {
-  const s = [...rows].sort((a, b) => a.x - b.x || b.y - a.y);
-  let hull = [];
-  for (const q of s) {
-    if (hull.length && hull.at(-1).x === q.x) continue; // same price, fewer points
-    while (hull.length >= 2) {
-      const [a, b] = hull.slice(-2);
-      if ((b.x - a.x) * (q.y - a.y) - (b.y - a.y) * (q.x - a.x) >= 0) hull.pop(); else break;
-    }
-    hull.push(q);
-  }
-  if (!hull.length) return null;
-  const top = hull.reduce((m, q, i) => (q.y > hull[m].y ? i : m), 0);
-  const start = hull.reduce((m, q, i) => (i <= top && q.y / q.x > hull[m].y / hull[m].x ? i : m), 0);
-  hull = hull.slice(start, top + 1);
-  const at = (x) => {
-    if (x <= hull[0].x) return (hull[0].y / hull[0].x) * x;
-    const i = hull.findIndex((q) => q.x >= x);
-    if (i < 0) return hull.at(-1).y;
-    const a = hull[i - 1], b = hull[i];
-    return a.y + ((b.y - a.y) * (x - a.x)) / (b.x - a.x);
-  };
-  return { hull, at, gap: (r) => Math.max(0, at(r.x) - r.y) };
-}
 
 // Each toggled position's curve and its players, closest first. "Near" is
 // within the model's margin of error on a projection (sigma_mean): a player
@@ -554,7 +525,7 @@ function ValuePicks({ curves, ym, placedIds, onPick, fairShare }) {
   );
 }
 
-export default function Stats({ players, recency, placedIds, onPick }) {
+export default function Stats({ players, recency, placedIds, onPick, squad, bank, priceOf }) {
   const teams = useContext(TeamsContext);
   const [xk, setXk] = useState("price");
   const [yk, setYk] = useState("points");
@@ -668,6 +639,7 @@ export default function Stats({ players, recency, placedIds, onPick }) {
           {curvePos.size > 0 && !curvesOn && <small className="hint">Set X to Price and Y to expected points to see the curves.</small>}
         </div>
         <Scatter shown={curves.length ? shown.filter((p) => curvePos.has(p.position)) : shown} xk={xk} yk={yk} recency={recency} placedIds={placedIds} onPick={onPick} curves={curves} />
+        {squad?.length === 15 && <CurveCheck squad={squad} players={players} bank={bank} priceOf={priceOf} recency={recency} />}
         <ValuePicks curves={curves} ym={METRICS[yk]} placedIds={placedIds} onPick={onPick} fairShare={fairShare} />
       </section>
 
