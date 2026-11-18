@@ -106,6 +106,20 @@ export const SORT_KEYS = ["points", "horizon", "value", "form", "xgi", "start_pr
 // Numeric metrics offered as scatter axes.
 export const AXIS_KEYS = Object.keys(METRICS);
 
+// Fresh team news: FPL changed this player's flag within FRESH_HOURS (late
+// injury news, often from an international break, lands just before deadlines).
+export const FRESH_HOURS = 48;
+export function newsAge(p, now = Date.now()) {
+  if (!p.news || !p.news_added) return null;
+  const h = (now - Date.parse(p.news_added)) / 36e5;
+  return Number.isFinite(h) && h >= 0 ? h : null;
+}
+export const freshNews = (p, now) => (newsAge(p, now) ?? Infinity) < FRESH_HOURS;
+export function ago(h) {
+  if (h == null) return "";
+  return h < 1 ? "just now" : h < 24 ? `${Math.round(h)}h ago` : `${Math.round(h / 24)}d ago`;
+}
+
 // Yellow-card ban risk from the export: { yellows, limit, by, games, risk },
 // risk = chance he's banned for a game in the next few gameweeks.
 export const banRisk = (p) => p.ban?.risk ?? 0;

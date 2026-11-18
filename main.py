@@ -634,7 +634,7 @@ EXPORT_COLUMNS = [
     "defcon_xp", "defcon_per_90", "cs_xp", "cs_prob", "fixture_difficulty",
     "form", "starts", "minutes", "avg_minutes", "total_points",
     "points_per_game", "selected_by_percent", "xgi_per_90",
-    "xg_per_90", "xa_per_90", "on_pens", "on_fks", "on_corners", "status", "news", "cost_change_start",
+    "xg_per_90", "xa_per_90", "on_pens", "on_fks", "on_corners", "status", "news", "news_added", "cost_change_start",
     "goals_scored", "assists", "clean_sheets", "bonus", "net_transfers", "price_change", "rise_chance", "fall_chance",
     "xp_gw", "rules_next", "rules_h", "recent_xp", "missed_gws", "last_season_pts", "yellow_cards", "ban",
 ]

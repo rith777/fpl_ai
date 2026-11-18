@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { POS_COLOR, adjPoints, banRisk } from "../lib.js";
+import { POS_COLOR, adjPoints, ago, banRisk, freshNews, newsAge } from "../lib.js";
 import { CHIP_NAMES, chipsLeft } from "../rules.js";
 import { CaptainDuel, DeadlineRing, PointsRace, PriceRadar } from "./Widgets.jsx";
 import { HIT_COST, horizon, model, rollCheck, transferPlan, userPlanOptions } from "../transfers.js";
@@ -104,6 +104,7 @@ function Lineup({ captain, vice, lineup, onBestXI, recency, squad }) {
   const shortlist = useMemo(() => [...squad].sort((a, b) => adjPoints(b, recency) - adjPoints(a, recency)).slice(0, 3), [squad, recency]);
   const top = shortlist[0] ? adjPoints(shortlist[0], recency) : 1;
   const doubts = squad.filter((p) => p.status && p.status !== "a");
+  const fresh = squad.filter((p) => freshNews(p)).sort((a, b) => newsAge(a) - newsAge(b));
   const bans = squad.filter((p) => banRisk(p) >= 0.1);
   return (
     <section className="card tw-card">
@@ -124,7 +125,12 @@ function Lineup({ captain, vice, lineup, onBestXI, recency, squad }) {
           </li>
         ))}
       </ul>
-      {doubts.length > 0 && <p className="tw-doubt">Doubts: {doubts.map((p) => p.player_name).join(", ")}</p>}
+      {fresh.length > 0 && (
+        <ul className="tw-fresh" aria-label="News in the last 48 hours">
+          {fresh.map((p) => <li key={p.player_id}><em className="new-tag">New</em><b>{p.player_name}</b> {p.news} <small>{ago(newsAge(p))}</small></li>)}
+        </ul>
+      )}
+      {doubts.some((p) => !fresh.includes(p)) && <p className="tw-doubt">{fresh.length ? "Other doubts" : "Doubts"}: {doubts.filter((p) => !fresh.includes(p)).map((p) => p.player_name).join(", ")}</p>}
       {bans.length > 0 && <p className="tw-doubt">Ban risk: {bans.map((p) => `${p.player_name} (${p.ban.yellows} yellows, ${Math.round(p.ban.risk * 100)}%)`).join(", ")}</p>}
       <div className="tw-actions">
         {better && <button className="btn sm primary" onClick={onBestXI}>Use best XI</button>}

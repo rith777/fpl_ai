@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Dropdown, NextFixtures, Segmented, TeamsContext } from "./ui.jsx";
 import { HIT_COST, bestXI, expectedPoints, horizon, sellTest, sigmaGain, transferPlan, unavailable, userPlanOptions } from "../transfers.js";
-import { POSITIONS, banNote, banRisk } from "../lib.js";
+import { POSITIONS, ago, banNote, banRisk, freshNews, newsAge } from "../lib.js";
 
 // How far ahead the plan looks, in gameweeks.
 const AHEAD = 8;
@@ -106,7 +106,7 @@ function Row({ r, i, plan, setPlan, open, onToggle, nextGw }) {
         <span className="kp-rank">{i + 1}</span>
         <Badge teamId={p.team_id} size={26} />
         <span className="kp-name">
-          <b>{p.player_name}{p.status && p.status !== "a" && <i className={`dot ${p.status === "d" ? "doubt" : "out"}`} title={p.news} />}</b>
+          <b>{p.player_name}{p.status && p.status !== "a" && <i className={`dot ${p.status === "d" ? "doubt" : "out"}${freshNews(p) ? " fresh" : ""}`} title={`${p.news}${freshNews(p) ? ` (new, ${ago(newsAge(p))})` : ""}`} />}</b>
           <small>{p.position} · £{p.price.toFixed(1)}m · {r.xp.toFixed(1)} xP/GW</small>
         </span>
         <span className="kp-meter" aria-label={`Keep score ${score.toFixed(1)} out of 10`}>

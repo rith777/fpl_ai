@@ -199,6 +199,7 @@ class FPLApiClient:
                     "cost_change_start": el.get("cost_change_start", 0) / 10.0,
                     "value_season": float(el["value_season"]) if el["value_season"] else 0.0,
                     "news": el["news"],
+                    "news_added": el.get("news_added"),  # when FPL last changed the news (ISO time)
                 }
             )
         df = pd.DataFrame(rows)
