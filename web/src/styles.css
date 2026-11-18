@@ -1476,3 +1476,18 @@ i.yc { display: inline-block; width: 8px; height: 11px; margin-left: 6px; border
 .cc-slope.flat { color: var(--cyan); }
 .cc-tag.down { background: rgba(90, 184, 255, 0.15); color: var(--cyan); }
 .cc .hint b { color: var(--text); }
+
+/* Fresh team news (changed in the last 48h) */
+.new-tag { display: inline-block; font-style: normal; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 1px 6px; margin-right: 6px; border-radius: 6px; background: var(--amber); color: #1a1300; vertical-align: 1px; }
+.pd-news small { opacity: 0.75; }
+.tw-fresh { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.tw-fresh li { font-size: 12.5px; line-height: 1.45; padding: 7px 9px; border-radius: 9px; background: rgba(255, 176, 32, 0.1); color: var(--text); }
+.tw-fresh li b { margin-right: 4px; }
+.tw-fresh li small { color: var(--muted); margin-left: 4px; white-space: nowrap; }
+.prow .dot.fresh, .kp-name .dot.fresh { box-shadow: 0 0 0 0 rgba(255, 176, 32, 0.6); animation: fresh-pulse 1.8s ease-out infinite; }
+@keyframes fresh-pulse { 70% { box-shadow: 0 0 0 6px rgba(255, 176, 32, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 176, 32, 0); } }
+@media (prefers-reduced-motion: reduce) { .dot.fresh { animation: none; box-shadow: 0 0 0 2px rgba(255, 176, 32, 0.5); } }
+.kp-name .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 6px; vertical-align: 2px; }
+.kp-name .dot.doubt { background: var(--amber); }
+.kp-name .dot.out { background: var(--red); }

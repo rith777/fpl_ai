@@ -1,0 +1,32 @@
+# GitHub turns off scheduled workflows (the 6-hourly refresh, the weekly
+# retrain) in a repository with no commits for 60 days. Once a month this
+# checks the last commit on the default branch and, if it's over 45 days old,
+# pushes a one-line date stamp so the schedules stay on.
+name: Keep schedules on
+
+on:
+  schedule:
+    - cron: "41 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stamp the repository if it has been quiet
+        run: |
+          last=$(git log -1 --format=%ct)
+          age=$(( ($(date +%s) - last) / 86400 ))
+          echo "Last commit ${age} days ago"
+          if [ "$age" -lt 45 ] && [ "${{ github.event_name }}" = "schedule" ]; then exit 0; fi
+          date -u +%Y-%m-%dT%H:%M:%SZ > .github/keepalive
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/keepalive
+          git commit -m "Keep scheduled workflows on" || exit 0
+          git push
